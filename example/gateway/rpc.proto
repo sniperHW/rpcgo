@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+option go_package = "./pb";
+
+message RPCRequest {
+	uint64 seq     = 1;
+	string method  = 2;
+	bytes  arg     = 3;
+	bytes  context = 4;
+}
+
+message RPCResponse {
+	uint64 seq     = 1;
+	bytes  ret     = 2;
+	int32  errCode = 3;
+	string errDesc = 4;
+	bytes  context = 5;
+}

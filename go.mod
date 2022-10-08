@@ -3,9 +3,10 @@ module github.com/sniperHW/rpcgo
 go 1.18
 
 require (
-	github.com/sniperHW/network v0.0.0-20221006123301-642aa0c1f692
+	github.com/sniperHW/network v0.0.0-20221008013041-a5bcf77f8e31
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/zap v1.23.0
+	google.golang.org/protobuf v1.28.1
 )
 
 require (
