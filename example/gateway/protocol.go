@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/sniperHW/network"
+	"github.com/sniperHW/netgo"
 	"github.com/sniperHW/rpcgo"
 	"github.com/sniperHW/rpcgo/example/gateway/pb"
 	"google.golang.org/protobuf/proto"
@@ -23,7 +23,7 @@ type PacketReceiver struct {
 	buff []byte
 }
 
-func (r *PacketReceiver) read(readable network.ReadAble, deadline time.Time) (n int, err error) {
+func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (n int, err error) {
 	if deadline.IsZero() {
 		readable.SetReadDeadline(time.Time{})
 		n, err = readable.Read(r.buff[r.w:])
@@ -34,7 +34,7 @@ func (r *PacketReceiver) read(readable network.ReadAble, deadline time.Time) (n 
 	return
 }
 
-func (r *PacketReceiver) Recv(readable network.ReadAble, deadline time.Time) (pkt []byte, err error) {
+func (r *PacketReceiver) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
 	const lenHead int = 4
 	for {
 		rr := r.r

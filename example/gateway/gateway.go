@@ -1,27 +1,27 @@
 package main
 
 import (
-	"github.com/sniperHW/network"
+	"github.com/sniperHW/netgo"
 	"log"
 	"net"
 	"time"
 )
 
 func startGateway(gateService string, rpcService string) {
-	_, serve, _ := network.ListenTCP("tcp", gateService, func(conn *net.TCPConn) {
+	_, serve, _ := netgo.ListenTCP("tcp", gateService, func(conn *net.TCPConn) {
 		go func() {
 			dialer := &net.Dialer{}
-			var rpcSocket network.Socket
+			var rpcSocket netgo.Socket
 			for {
 				conn, err := dialer.Dial("tcp", rpcService)
 				if err != nil {
 					time.Sleep(time.Second)
 				} else {
-					rpcSocket = network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{gate: true, buff: make([]byte, 4096)})
+					rpcSocket = netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{gate: true, buff: make([]byte, 4096)})
 					break
 				}
 			}
-			cli := network.NewTcpSocket(conn, &PacketReceiver{gate: true, buff: make([]byte, 4096)})
+			cli := netgo.NewTcpSocket(conn, &PacketReceiver{gate: true, buff: make([]byte, 4096)})
 			for {
 				request, err := cli.Recv()
 				if nil != err {

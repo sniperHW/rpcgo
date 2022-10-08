@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/sniperHW/network"
+	"github.com/sniperHW/netgo"
 	"github.com/sniperHW/rpcgo"
 	"time"
 	"unsafe"
 )
 
 type rcpChannel struct {
-	socket *network.AsynSocket
+	socket *netgo.AsynSocket
 }
 
 func (c *rcpChannel) SendRequest(request *rpcgo.RPCRequestMessage, deadline time.Time) error {

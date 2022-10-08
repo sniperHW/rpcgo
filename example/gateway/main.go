@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"github.com/sniperHW/network"
+	"github.com/sniperHW/netgo"
 	"github.com/sniperHW/rpcgo"
 	"go.uber.org/zap"
 	"log"
@@ -31,8 +31,8 @@ func main() {
 		}
 	}
 
-	as := network.NewAsynSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
-		network.AsynSocketOption{
+	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
+		netgo.AsynSocketOption{
 			Decoder:  &PacketDecoder{},
 			Packer:   &PacketPacker{},
 			AutoRecv: true,
@@ -40,7 +40,7 @@ func main() {
 
 	channel := &rcpChannel{socket: as}
 	rpcClient := rpcgo.NewClient()
-	as.SetPacketHandler(func(as *network.AsynSocket, resp interface{}) {
+	as.SetPacketHandler(func(as *netgo.AsynSocket, resp interface{}) {
 		rpcClient.OnRPCMessage(resp.(*rpcgo.RPCResponseMessage))
 	}).Recv()
 

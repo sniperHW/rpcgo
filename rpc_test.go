@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/sniperHW/network"
+	"github.com/sniperHW/netgo"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"net"
@@ -138,7 +138,7 @@ const (
 )
 
 type testChannel struct {
-	socket *network.AsynSocket
+	socket *netgo.AsynSocket
 }
 
 func (c *testChannel) SendRequest(request *RPCRequestMessage, deadline time.Time) error {
@@ -245,7 +245,7 @@ type PacketReceiver struct {
 	buff []byte
 }
 
-func (r *PacketReceiver) read(readable network.ReadAble, deadline time.Time) (n int, err error) {
+func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (n int, err error) {
 	if deadline.IsZero() {
 		readable.SetReadDeadline(time.Time{})
 		n, err = readable.Read(r.buff[r.w:])
@@ -256,7 +256,7 @@ func (r *PacketReceiver) read(readable network.ReadAble, deadline time.Time) (n 
 	return
 }
 
-func (r *PacketReceiver) Recv(readable network.ReadAble, deadline time.Time) (pkt []byte, err error) {
+func (r *PacketReceiver) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
 	const lenHead int = 4
 	for {
 		rr := r.r
@@ -310,15 +310,15 @@ func TestRPC(t *testing.T) {
 		req.Reply(fmt.Sprintf("hello world:%s", req.Argumment().(string)), nil)
 	})
 
-	listener, serve, _ := network.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
 		logger.Sugar().Debugf("on new client")
-		as := network.NewAsynSocket(network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
-			network.AsynSocketOption{
+		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
+			netgo.AsynSocketOption{
 				Decoder:  &PacketDecoder{},
 				Packer:   &PacketPacker{},
 				AutoRecv: true,
 			})
-		as.SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 			switch packet.(type) {
 			case string:
 				logger.Sugar().Debugf("on message")
@@ -333,8 +333,8 @@ func TestRPC(t *testing.T) {
 
 	dialer := &net.Dialer{}
 	conn, _ := dialer.Dial("tcp", "localhost:8110")
-	as := network.NewAsynSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
-		network.AsynSocketOption{
+	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
+		netgo.AsynSocketOption{
 			Decoder:  &PacketDecoder{},
 			Packer:   &PacketPacker{},
 			AutoRecv: true,
@@ -344,7 +344,7 @@ func TestRPC(t *testing.T) {
 
 	rpcChannel := &testChannel{socket: as}
 	rpcClient := NewClient()
-	as.SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+	as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 		switch packet.(type) {
 		case string:
 			close(msgChan)
