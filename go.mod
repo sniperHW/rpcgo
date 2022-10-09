@@ -6,7 +6,6 @@ require (
 	github.com/sniperHW/netgo v0.0.0-20221008111406-fd85db6dc290
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/zap v1.23.0
-	google.golang.org/protobuf v1.28.1
 )
 
 require (

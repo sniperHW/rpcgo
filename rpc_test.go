@@ -5,6 +5,7 @@ package rpcgo
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/sniperHW/netgo"
@@ -15,6 +16,17 @@ import (
 	"time"
 	"unsafe"
 )
+
+type JsonCodec struct {
+}
+
+func (c *JsonCodec) Encode(v interface{}) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+func (c *JsonCodec) Decode(b []byte, v interface{}) error {
+	return json.Unmarshal(b, v)
+}
 
 func init() {
 	InitLogger(zap.NewExample())
@@ -32,103 +44,10 @@ func AppendBytes(bs []byte, bytes []byte) []byte {
 	return append(bs, bytes...)
 }
 
-func AppendUint16(bs []byte, u16 uint16) []byte {
-	bu := []byte{0, 0}
-	binary.BigEndian.PutUint16(bu, u16)
-	return AppendBytes(bs, bu)
-}
-
 func AppendUint32(bs []byte, u32 uint32) []byte {
 	bu := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(bu, u32)
 	return AppendBytes(bs, bu)
-}
-
-func AppendUint64(bs []byte, u64 uint64) []byte {
-	bu := []byte{0, 0, 0, 0, 0, 0, 0, 0}
-	binary.BigEndian.PutUint64(bu, u64)
-	return AppendBytes(bs, bu)
-}
-
-type BufferReader struct {
-	bs     []byte
-	offset int
-}
-
-func NewReader(b []byte) BufferReader {
-	return BufferReader{bs: b}
-}
-
-func (this *BufferReader) Reset(b []byte) {
-	if len(b) > 0 {
-		this.bs = b
-	}
-	this.offset = 0
-}
-
-func (this *BufferReader) GetAll() []byte {
-	return this.bs[this.offset:]
-}
-
-func (this *BufferReader) GetOffset() int {
-	return this.offset
-}
-
-func (this *BufferReader) IsOver() bool {
-	return this.offset >= len(this.bs)
-}
-
-func (this *BufferReader) GetByte() byte {
-	if this.offset+1 > len(this.bs) {
-		return 0
-	} else {
-		ret := this.bs[this.offset]
-		this.offset += 1
-		return ret
-	}
-}
-
-func (this *BufferReader) GetUint16() uint16 {
-	if this.offset+2 > len(this.bs) {
-		return 0
-	} else {
-		ret := binary.BigEndian.Uint16(this.bs[this.offset : this.offset+2])
-		this.offset += 2
-		return ret
-	}
-}
-
-func (this *BufferReader) GetUint32() uint32 {
-	if this.offset+4 > len(this.bs) {
-		return 0
-	} else {
-		ret := binary.BigEndian.Uint32(this.bs[this.offset : this.offset+4])
-		this.offset += 4
-		return ret
-	}
-}
-
-func (this *BufferReader) GetUint64() uint64 {
-	if this.offset+8 > len(this.bs) {
-		return 0
-	} else {
-		ret := binary.BigEndian.Uint64(this.bs[this.offset : this.offset+8])
-		this.offset += 8
-		return ret
-	}
-}
-
-func (this *BufferReader) GetString(size int) string {
-	return string(this.GetBytes(size))
-}
-
-func (this *BufferReader) GetBytes(size int) []byte {
-	if len(this.bs)-this.offset < size {
-		size = len(this.bs) - this.offset
-	}
-	ret := this.bs[this.offset : this.offset+size]
-	this.offset += size
-	return ret
 }
 
 const (
@@ -162,35 +81,20 @@ func (c *testChannel) Identity() uint64 {
 }
 
 type PacketDecoder struct {
-	reader BufferReader
 }
 
 func (d *PacketDecoder) Decode(b []byte) (interface{}, error) {
-	d.reader.Reset(b)
-	switch d.reader.GetByte() {
+	switch b[0] {
 	case packet_rpc_request:
 		request := &RPCRequestMessage{}
-		request.Seq = d.reader.GetUint64()
-		lenMethod := int(d.reader.GetByte())
-		request.Method = d.reader.GetString(lenMethod)
-		lenArg := int(d.reader.GetByte())
-		request.Arg = d.reader.GetString(lenArg)
+		json.Unmarshal(b[1:], request)
 		return request, nil
 	case packet_rpc_response:
 		response := &RPCResponseMessage{}
-		response.Seq = d.reader.GetUint64()
-		errCode := int(d.reader.GetByte())
-		if errCode == 0 {
-			lenRet := int(d.reader.GetByte())
-			response.Ret = d.reader.GetString(lenRet)
-		} else {
-			lenErr := int(d.reader.GetByte())
-			response.Err = NewError(errCode, d.reader.GetString(lenErr))
-		}
+		json.Unmarshal(b[1:], response)
 		return response, nil
 	case packet_msg:
-		lenMsg := int(d.reader.GetByte())
-		return d.reader.GetString(lenMsg), nil
+		return string(b[1:]), nil
 	default:
 		return nil, errors.New("invaild packet")
 	}
@@ -207,29 +111,17 @@ func (e *PacketPacker) Pack(b []byte, o interface{}) []byte {
 		request := o.(*RPCRequestMessage)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_request)
-		b = AppendUint64(b, request.Seq)
-		b = AppendByte(b, byte(len(request.Method)))
-		b = AppendString(b, request.Method)
-		b = AppendByte(b, byte(len(request.Arg.(string))))
-		b = AppendString(b, request.Arg.(string))
+		jsonByte, _ := json.Marshal(request)
+		b = AppendBytes(b, jsonByte)
 	case *RPCResponseMessage:
 		response := o.(*RPCResponseMessage)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_response)
-		b = AppendUint64(b, response.Seq)
-		if response.Err == nil {
-			b = AppendByte(b, byte(0))
-			b = AppendByte(b, byte(len(response.Ret.(string))))
-			b = AppendString(b, response.Ret.(string))
-		} else {
-			b = AppendByte(b, byte(response.Err.Code()))
-			b = AppendByte(b, byte(len(response.Err.Description())))
-			b = AppendString(b, response.Err.Description())
-		}
+		jsonByte, _ := json.Marshal(response)
+		b = AppendBytes(b, jsonByte)
 	case string:
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_msg)
-		b = AppendByte(b, byte(len(o.(string))))
 		b = AppendString(b, o.(string))
 	default:
 		return b
@@ -304,10 +196,10 @@ func (r *PacketReceiver) Recv(readable netgo.ReadAble, deadline time.Time) (pkt 
 }
 
 func TestRPC(t *testing.T) {
-	rpcServer := NewServer()
+	rpcServer := NewServer(&JsonCodec{})
 
-	rpcServer.RegisterMethod("hello", func(req RPCRequest) {
-		req.Reply(fmt.Sprintf("hello world:%s", req.Argumment().(string)), nil)
+	rpcServer.RegisterMethod("hello", func(replyer *Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
 	})
 
 	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
@@ -343,7 +235,7 @@ func TestRPC(t *testing.T) {
 	msgChan := make(chan struct{})
 
 	rpcChannel := &testChannel{socket: as}
-	rpcClient := NewClient()
+	rpcClient := NewClient(&JsonCodec{})
 	as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 		switch packet.(type) {
 		case string:
@@ -356,30 +248,29 @@ func TestRPC(t *testing.T) {
 	<-msgChan
 
 	logger.Sugar().Debugf("begin rpc call")
-	resp, err := rpcClient.Call(context.TODO(), rpcChannel, &RPCRequestMessage{
-		Method: "hello",
-		Arg:    "sniperHW"})
+
+	var resp string
+	err := rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
 	assert.Nil(t, err)
-	assert.Equal(t, resp.(string), "hello world:sniperHW")
-
-	resp, err = rpcClient.Call(context.TODO(), rpcChannel, &RPCRequestMessage{
-		Method: "world",
-		Arg:    "sniperHW"})
-	assert.Equal(t, err.Description(), "method world not found")
-
-	rpcServer.Pause()
+	assert.Equal(t, resp, "hello world:sniperHW")
 
 	c := make(chan struct{})
 
-	rpcClient.AsynCall(rpcChannel, &RPCRequestMessage{
-		Method: "hello",
-		Arg:    "sniperHW",
-	}, time.Now().Add(time.Second), func(_ interface{}, err *Error) {
-		assert.Equal(t, err.Description(), "server pause")
+	rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "hello", "hw", &resp, func(resp interface{}, err *Error) {
+		assert.Equal(t, *resp.(*string), "hello world:hw")
 		close(c)
 	})
 
 	<-c
+
+	/*
+		resp, err = rpcClient.Call(context.TODO(), rpcChannel, &RPCRequestMessage{
+			Method: "world",
+			Arg:    "sniperHW"})
+		assert.Equal(t, err.Description(), "method world not found")
+
+		rpcServer.Pause()
+	*/
 
 	as.Close(nil)
 

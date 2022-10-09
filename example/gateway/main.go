@@ -39,15 +39,14 @@ func main() {
 		})
 
 	channel := &rcpChannel{socket: as}
-	rpcClient := rpcgo.NewClient()
+	rpcClient := rpcgo.NewClient(&JsonCodec{})
 	as.SetPacketHandler(func(as *netgo.AsynSocket, resp interface{}) {
 		rpcClient.OnRPCMessage(resp.(*rpcgo.RPCResponseMessage))
 	}).Recv()
 
 	for i := 0; i < 100; i++ {
-		resp, err := rpcClient.Call(context.TODO(), channel, &rpcgo.RPCRequestMessage{
-			Method: "hello",
-			Arg:    "sniperHW"})
+		var resp string
+		err := rpcClient.Call(context.TODO(), channel, "hello", "sniperHW", &resp)
 		log.Println(resp, err)
 	}
 

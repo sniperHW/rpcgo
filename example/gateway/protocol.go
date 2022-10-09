@@ -2,12 +2,10 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"github.com/sniperHW/netgo"
 	"github.com/sniperHW/rpcgo"
-	"github.com/sniperHW/rpcgo/example/gateway/pb"
-	"google.golang.org/protobuf/proto"
-	"log"
 	"time"
 )
 
@@ -91,33 +89,13 @@ type PacketDecoder struct {
 func (d *PacketDecoder) Decode(b []byte) (interface{}, error) {
 	switch b[0] {
 	case packet_rpc_request:
-		var request pb.RPCRequest
-		err := proto.Unmarshal(b[1:], &request)
-		if err != nil {
-			return nil, err
-		} else {
-			return &rpcgo.RPCRequestMessage{
-				Seq:    request.Seq,
-				Method: request.Method,
-				Arg:    string(request.Arg),
-			}, nil
-		}
+		request := &rpcgo.RPCRequestMessage{}
+		json.Unmarshal(b[1:], request)
+		return request, nil
 	case packet_rpc_response:
-		var response pb.RPCResponse
-		err := proto.Unmarshal(b[1:], &response)
-		if err != nil {
-			return nil, err
-		} else {
-			resp := &rpcgo.RPCResponseMessage{
-				Seq: response.Seq,
-			}
-			if response.ErrCode != 0 {
-				resp.Err = rpcgo.NewError(int(response.ErrCode), response.ErrDesc)
-			} else {
-				resp.Ret = string(response.Ret)
-			}
-			return resp, nil
-		}
+		response := &rpcgo.RPCResponseMessage{}
+		json.Unmarshal(b[1:], response)
+		return response, nil
 	default:
 		return nil, errors.New("invaild packet")
 	}
@@ -141,45 +119,34 @@ type PacketPacker struct {
 }
 
 func (e *PacketPacker) Pack(b []byte, o interface{}) []byte {
+	offset := len(b)
 	switch o.(type) {
 	case *rpcgo.RPCRequestMessage:
-		request := pb.RPCRequest{
-			Seq:    o.(*rpcgo.RPCRequestMessage).Seq,
-			Method: o.(*rpcgo.RPCRequestMessage).Method,
-			Arg:    []byte(o.(*rpcgo.RPCRequestMessage).Arg.(string)),
-		}
-		buff, err := proto.Marshal(&request)
-		if err != nil {
-			log.Println("Pack err", err)
-			return b
-		}
-
-		b = AppendUint32(b, uint32(len(buff)+1))
+		request := o.(*rpcgo.RPCRequestMessage)
+		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_request)
-		return AppendBytes(b, buff)
+		jsonByte, _ := json.Marshal(request)
+		b = AppendBytes(b, jsonByte)
 	case *rpcgo.RPCResponseMessage:
-		response := pb.RPCResponse{
-			Seq: o.(*rpcgo.RPCResponseMessage).Seq,
-		}
-
-		if o.(*rpcgo.RPCResponseMessage).Err == nil {
-			response.Ret = []byte(o.(*rpcgo.RPCResponseMessage).Ret.(string))
-		} else {
-			response.ErrCode = int32(o.(*rpcgo.RPCResponseMessage).Err.Code())
-			response.ErrDesc = o.(*rpcgo.RPCResponseMessage).Err.Description()
-		}
-
-		buff, err := proto.Marshal(&response)
-		if err != nil {
-			log.Println("Pack err", err)
-			return b
-		}
-
-		b = AppendUint32(b, uint32(len(buff)+1))
+		response := o.(*rpcgo.RPCResponseMessage)
+		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_response)
-		return AppendBytes(b, buff)
+		jsonByte, _ := json.Marshal(response)
+		b = AppendBytes(b, jsonByte)
 	default:
-		log.Println("Pack err:invaild packet")
 		return b
 	}
+	binary.BigEndian.PutUint32(b[offset:], uint32(len(b)-offset-4))
+	return b
+}
+
+type JsonCodec struct {
+}
+
+func (c *JsonCodec) Encode(v interface{}) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+func (c *JsonCodec) Decode(b []byte, v interface{}) error {
+	return json.Unmarshal(b, v)
 }

@@ -9,10 +9,10 @@ import (
 )
 
 func startService(service string) {
-	rpcServer := rpcgo.NewServer()
+	rpcServer := rpcgo.NewServer(&JsonCodec{})
 
-	rpcServer.RegisterMethod("hello", func(req rpcgo.RPCRequest) {
-		req.Reply(fmt.Sprintf("hello world:%s", req.Argumment().(string)), nil)
+	rpcServer.RegisterMethod("hello", func(replyer *rpcgo.Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
 	})
 
 	_, serve, _ := netgo.ListenTCP("tcp", service, func(conn *net.TCPConn) {

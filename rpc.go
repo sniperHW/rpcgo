@@ -19,23 +19,8 @@ func InitLogger(l *zap.Logger) {
  */
 
 type Error struct {
-	code        int
-	description string
-}
-
-func NewError(code int, description string) *Error {
-	return &Error{
-		code:        code,
-		description: description,
-	}
-}
-
-func (e *Error) Code() int {
-	return e.code
-}
-
-func (e *Error) Description() string {
-	return e.description
+	Code        int
+	Description string
 }
 
 const (
@@ -48,20 +33,25 @@ const (
 	ErrChannelDisconnected = 6
 	ErrSend                = 7
 	ErrEncode              = 8
+	ErrDecode              = 9
 )
 
 type RPCRequestMessage struct {
-	Seq     uint64
-	Method  string
-	Arg     interface{}
-	Context interface{}
+	Seq    uint64
+	Method string
+	Arg    []byte
 }
 
 type RPCResponseMessage struct {
-	Seq     uint64
-	Err     *Error
-	Context interface{}
-	Ret     interface{}
+	Seq uint64
+	Err *Error
+	Ret []byte
+}
+
+//encode/decode Arg/Ret
+type Codec interface {
+	Encode(interface{}) ([]byte, error)
+	Decode([]byte, interface{}) error
 }
 
 type RPCChannel interface {
