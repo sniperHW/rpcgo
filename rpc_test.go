@@ -202,6 +202,13 @@ func TestRPC(t *testing.T) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
 	})
 
+	rpcServer.RegisterMethod("timeout", func(replyer *Replyer, arg *string) {
+		go func() {
+			time.Sleep(time.Second * 5)
+			replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
+		}()
+	})
+
 	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
 		logger.Sugar().Debugf("on new client")
 		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
@@ -263,14 +270,15 @@ func TestRPC(t *testing.T) {
 
 	<-c
 
-	/*
-		resp, err = rpcClient.Call(context.TODO(), rpcChannel, &RPCRequestMessage{
-			Method: "world",
-			Arg:    "sniperHW"})
-		assert.Equal(t, err.Description(), "method world not found")
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	defer cancel()
+	err = rpcClient.Call(ctx, rpcChannel, "timeout", "sniperHW", &resp)
+	assert.Equal(t, err.Code, ErrTimeout)
 
-		rpcServer.Pause()
-	*/
+	rpcServer.Pause()
+
+	err = rpcClient.Call(context.TODO(), rpcChannel, "timeout", "sniperHW", &resp)
+	assert.Equal(t, err.Code, ErrServerPause)
 
 	as.Close(nil)
 

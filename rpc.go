@@ -34,6 +34,7 @@ const (
 	ErrSend                = 7
 	ErrEncode              = 8
 	ErrDecode              = 9
+	ErrCancel              = 10
 )
 
 type RPCRequestMessage struct {
