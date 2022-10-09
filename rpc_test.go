@@ -137,15 +137,12 @@ type PacketReceiver struct {
 	buff []byte
 }
 
-func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (n int, err error) {
-	if deadline.IsZero() {
-		readable.SetReadDeadline(time.Time{})
-		n, err = readable.Read(r.buff[r.w:])
+func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (int, error) {
+	if err := readable.SetReadDeadline(deadline); err != nil {
+		return 0, err
 	} else {
-		readable.SetReadDeadline(deadline)
-		n, err = readable.Read(r.buff[r.w:])
+		return readable.Read(r.buff[r.w:])
 	}
-	return
 }
 
 func (r *PacketReceiver) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
