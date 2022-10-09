@@ -106,26 +106,26 @@ type PacketPacker struct {
 func (e *PacketPacker) Pack(b []byte, o interface{}) []byte {
 	logger.Sugar().Debugf("pack %v", o)
 	offset := len(b)
+	var bytes []byte
 	switch o.(type) {
 	case *RPCRequestMessage:
 		request := o.(*RPCRequestMessage)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_request)
-		jsonByte, _ := json.Marshal(request)
-		b = AppendBytes(b, jsonByte)
+		bytes, _ = json.Marshal(request)
 	case *RPCResponseMessage:
 		response := o.(*RPCResponseMessage)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_response)
-		jsonByte, _ := json.Marshal(response)
-		b = AppendBytes(b, jsonByte)
+		bytes, _ = json.Marshal(response)
 	case string:
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_msg)
-		b = AppendString(b, o.(string))
+		bytes = []byte(o.(string))
 	default:
 		return b
 	}
+	b = AppendBytes(b, bytes)
 	binary.BigEndian.PutUint32(b[offset:], uint32(len(b)-offset-4))
 	logger.Sugar().Debugf("len %d", len(b))
 	return b

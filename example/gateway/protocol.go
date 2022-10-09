@@ -117,22 +117,22 @@ type PacketPacker struct {
 
 func (e *PacketPacker) Pack(b []byte, o interface{}) []byte {
 	offset := len(b)
+	var jsonByte []byte
 	switch o.(type) {
 	case *rpcgo.RPCRequestMessage:
 		request := o.(*rpcgo.RPCRequestMessage)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_request)
-		jsonByte, _ := json.Marshal(request)
-		b = AppendBytes(b, jsonByte)
+		jsonByte, _ = json.Marshal(request)
 	case *rpcgo.RPCResponseMessage:
 		response := o.(*rpcgo.RPCResponseMessage)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_response)
-		jsonByte, _ := json.Marshal(response)
-		b = AppendBytes(b, jsonByte)
+		jsonByte, _ = json.Marshal(response)
 	default:
 		return b
 	}
+	b = AppendBytes(b, jsonByte)
 	binary.BigEndian.PutUint32(b[offset:], uint32(len(b)-offset-4))
 	return b
 }
