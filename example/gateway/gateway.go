@@ -17,11 +17,11 @@ func startGateway(gateService string, rpcService string) {
 				if err != nil {
 					time.Sleep(time.Second)
 				} else {
-					rpcSocket = netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{gate: true, buff: make([]byte, 4096)})
+					rpcSocket = netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketCodec{gate: true, buff: make([]byte, 4096)})
 					break
 				}
 			}
-			cli := netgo.NewTcpSocket(conn, &PacketReceiver{gate: true, buff: make([]byte, 4096)})
+			cli := netgo.NewTcpSocket(conn, &PacketCodec{gate: true, buff: make([]byte, 4096)})
 			for {
 				request, err := cli.Recv()
 				if nil != err {

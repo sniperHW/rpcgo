@@ -36,10 +36,6 @@ func AppendByte(bs []byte, v byte) []byte {
 	return append(bs, v)
 }
 
-func AppendString(bs []byte, s string) []byte {
-	return append(bs, s...)
-}
-
 func AppendBytes(bs []byte, bytes []byte) []byte {
 	return append(bs, bytes...)
 }
@@ -80,10 +76,13 @@ func (c *testChannel) Identity() uint64 {
 	return *(*uint64)(unsafe.Pointer(c.socket))
 }
 
-type PacketDecoder struct {
+type PacketCodec struct {
+	r    int
+	w    int
+	buff []byte
 }
 
-func (d *PacketDecoder) Decode(b []byte) (interface{}, error) {
+func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 	switch b[0] {
 	case packet_rpc_request:
 		request := &RPCRequestMessage{}
@@ -100,10 +99,7 @@ func (d *PacketDecoder) Decode(b []byte) (interface{}, error) {
 	}
 }
 
-type PacketPacker struct {
-}
-
-func (e *PacketPacker) Pack(b []byte, o interface{}) []byte {
+func (codec *PacketCodec) Encode(b []byte, o interface{}) []byte {
 	logger.Sugar().Debugf("pack %v", o)
 	offset := len(b)
 	var bytes []byte
@@ -131,60 +127,54 @@ func (e *PacketPacker) Pack(b []byte, o interface{}) []byte {
 	return b
 }
 
-type PacketReceiver struct {
-	r    int
-	w    int
-	buff []byte
-}
-
-func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (int, error) {
+func (codec *PacketCodec) read(readable netgo.ReadAble, deadline time.Time) (int, error) {
 	if err := readable.SetReadDeadline(deadline); err != nil {
 		return 0, err
 	} else {
-		return readable.Read(r.buff[r.w:])
+		return readable.Read(codec.buff[codec.w:])
 	}
 }
 
-func (r *PacketReceiver) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
+func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
 	const lenHead int = 4
 	for {
-		rr := r.r
+		rr := codec.r
 		pktLen := 0
-		if (r.w-rr) >= lenHead && uint32(r.w-rr-lenHead) >= binary.BigEndian.Uint32(r.buff[rr:]) {
-			pktLen = int(binary.BigEndian.Uint32(r.buff[rr:]))
+		if (codec.w-rr) >= lenHead && uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
+			pktLen = int(binary.BigEndian.Uint32(codec.buff[rr:]))
 			logger.Sugar().Debugf("on packet pktLen %d", pktLen)
 			rr += lenHead
 		}
 
 		if pktLen > 0 {
-			if pktLen > (len(r.buff) - lenHead) {
+			if pktLen > (len(codec.buff) - lenHead) {
 				err = errors.New("pkt too large")
 				return
 			}
-			if (r.w - rr) >= pktLen {
-				pkt = r.buff[rr : rr+pktLen]
+			if (codec.w - rr) >= pktLen {
+				pkt = codec.buff[rr : rr+pktLen]
 				rr += pktLen
-				r.r = rr
-				if r.r == r.w {
-					r.r = 0
-					r.w = 0
+				codec.r = rr
+				if codec.r == codec.w {
+					codec.r = 0
+					codec.w = 0
 				}
 				return
 			}
 		}
 
-		if r.r > 0 {
+		if codec.r > 0 {
 			//移动到头部
-			copy(r.buff, r.buff[r.r:r.w])
-			r.w = r.w - r.r
-			r.r = 0
+			copy(codec.buff, codec.buff[codec.r:codec.w])
+			codec.w = codec.w - codec.r
+			codec.r = 0
 		}
 
 		var n int
-		n, err = r.read(readable, deadline)
+		n, err = codec.read(readable, deadline)
 		logger.Sugar().Debugf("on read %d", n)
 		if n > 0 {
-			r.w += n
+			codec.w += n
 		}
 		if nil != err {
 			return
@@ -202,16 +192,17 @@ func TestRPC(t *testing.T) {
 	rpcServer.RegisterMethod("timeout", func(replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
-			replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
+			logger.Sugar().Debugf("timeout reply")
+			replyer.Reply(fmt.Sprintf("timeout hello world:%s", *arg), nil)
 		}()
 	})
 
 	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
 		logger.Sugar().Debugf("on new client")
-		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
+		codec := &PacketCodec{buff: make([]byte, 4096)}
+		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
 			netgo.AsynSocketOption{
-				Decoder:  &PacketDecoder{},
-				Packer:   &PacketPacker{},
+				Codec:    codec,
 				AutoRecv: true,
 			})
 		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
@@ -229,10 +220,10 @@ func TestRPC(t *testing.T) {
 
 	dialer := &net.Dialer{}
 	conn, _ := dialer.Dial("tcp", "localhost:8110")
-	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
+	codec := &PacketCodec{buff: make([]byte, 4096)}
+	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
 		netgo.AsynSocketOption{
-			Decoder:  &PacketDecoder{},
-			Packer:   &PacketPacker{},
+			Codec:    codec,
 			AutoRecv: true,
 		})
 
@@ -271,6 +262,64 @@ func TestRPC(t *testing.T) {
 	defer cancel()
 	err = rpcClient.Call(ctx, rpcChannel, "timeout", "sniperHW", &resp)
 	assert.Equal(t, err.Code, ErrTimeout)
+
+	{
+		cancel := rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err *Error) {
+			assert.Equal(t, *resp.(*string), "hello world:hw")
+			panic("should not reach here")
+		})
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.Equal(t, true, cancel())
+
+		time.Sleep(time.Second * 5)
+	}
+
+	c = make(chan struct{})
+
+	rpcServer.RegisterMethod("syncOneway", func(replyer *Replyer, arg *string) {
+		logger.Sugar().Debugf("syncOneway %s", *arg)
+		replyer.Reply(*arg, nil)
+		close(c)
+	})
+
+	err = rpcClient.Call(context.TODO(), rpcChannel, "syncOneway", "sniperHW", nil)
+	assert.Nil(t, err)
+	<-c
+
+	c = make(chan struct{})
+
+	rpcServer.RegisterMethod("ayncOneway", func(replyer *Replyer, arg *string) {
+		logger.Sugar().Debugf("ayncOneway %s", *arg)
+		replyer.Reply(*arg, nil)
+		close(c)
+	})
+
+	rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "ayncOneway", "hw", nil, nil)
+
+	<-c
+
+	c = make(chan struct{})
+
+	rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err *Error) {
+		assert.Equal(t, err.Code, ErrTimeout)
+		close(c)
+	})
+
+	<-c
+
+	err = rpcClient.Call(context.TODO(), rpcChannel, "invaild method", "sniperHW", &resp)
+	assert.Equal(t, err.Code, ErrInvaildMethod)
+
+	rpcServer.RegisterMethod("panic", func(replyer *Replyer, arg *string) {
+		replyer = nil
+		//should panic here
+		replyer.Reply(*arg, nil)
+	})
+
+	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)
+	assert.Equal(t, err.Code, ErrRuntime)
 
 	rpcServer.Pause()
 

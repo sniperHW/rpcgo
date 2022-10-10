@@ -4,54 +4,44 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
-
-func formatFileLine(format string, v ...interface{}) string {
-	_, file, line, ok := runtime.Caller(1)
-	if ok {
-		s := fmt.Sprintf("[%s:%d]", file, line)
-		return strings.Join([]string{s, fmt.Sprintf(format, v...)}, "")
-	} else {
-		return fmt.Sprintf(format, v...)
-	}
-}
 
 type Replyer struct {
 	channel RPCChannel
 	seq     uint64
 	replyed int32
 	codec   Codec
+	oneway  bool
 }
 
 func (this *Replyer) Reply(ret interface{}, err *Error) {
-	if atomic.CompareAndSwapInt32(&this.replyed, 0, 1) {
+	if !this.oneway && atomic.CompareAndSwapInt32(&this.replyed, 0, 1) {
 		resp := &RPCResponseMessage{
 			Seq: this.seq,
 			Err: err}
 		if nil == err {
 			if b, e := this.codec.Encode(ret); e != nil {
-				logger.Sugar().Errorf(formatFileLine("send rpc response to (%s) encode ret error:%s\n", this.channel.Name(), e.Error()))
+				logger.Sugar().Errorf("send rpc response to (%s) encode ret error:%s\n", this.channel.Name(), e.Error())
 			} else {
 				resp.Ret = b
 			}
 		}
 		if e := this.channel.Reply(resp); e != nil {
-			logger.Sugar().Errorf(formatFileLine("send rpc response to (%s) error:%s\n", this.channel.Name(), e.Error()))
+			logger.Sugar().Errorf("send rpc response to (%s) error:%s\n", this.channel.Name(), e.Error())
 		}
 	}
 }
 
 type methodCaller struct {
+	name    string
 	argType reflect.Type
 	fn      interface{}
 }
 
 //接受的method func(*Replyer,*Pointer)
-func makeMethodCaller(method interface{}) (*methodCaller, error) {
+func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 	if method == nil {
 		return nil, errors.New("method is nil")
 	}
@@ -76,18 +66,25 @@ func makeMethodCaller(method interface{}) (*methodCaller, error) {
 	caller := &methodCaller{
 		argType: fnType.In(1).Elem(),
 		fn:      method,
+		name:    name,
 	}
 
 	return caller, nil
 }
 
-func (c *methodCaller) call(codec Codec, replyer *Replyer, req *RPCRequestMessage) error {
+func (c *methodCaller) call(codec Codec, replyer *Replyer, req *RPCRequestMessage) {
 	arg := reflect.New(c.argType).Interface()
 	if err := codec.Decode(req.Arg, arg); err == nil {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Sugar().Errorf("call method:%s channel:%s error:%v", c.name, replyer.channel.Name(), r)
+				replyer.Reply(nil, &Error{Code: ErrRuntime, Description: "call method:%s error"})
+			}
+		}()
 		reflect.ValueOf(c.fn).Call([]reflect.Value{reflect.ValueOf(replyer), reflect.ValueOf(arg)})
-		return nil
 	} else {
-		return err
+		logger.Sugar().Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
+		replyer.Reply(nil, &Error{Code: ErrRuntime, Description: fmt.Sprintf("decode arg error:%s", err.Error())})
 	}
 }
 
@@ -118,7 +115,7 @@ func (this *RPCServer) RegisterMethod(name string, method interface{}) error {
 	if name == "" {
 		logger.Sugar().Errorf("RegisterMethod nams is nil")
 		return errors.New("RegisterMethod nams is nil")
-	} else if caller, err := makeMethodCaller(method); err != nil {
+	} else if caller, err := makeMethodCaller(name, method); err != nil {
 		logger.Sugar().Errorf("RegisterMethod nams error:%s", err.Error())
 		return err
 	} else {
@@ -146,14 +143,14 @@ func (this *RPCServer) GetMethod(name string) *methodCaller {
 
 func (this *RPCServer) OnRPCMessage(channel RPCChannel, req *RPCRequestMessage) {
 	caller := this.GetMethod(req.Method)
-	replyer := &Replyer{channel: channel, seq: req.Seq, codec: this.codec}
+	replyer := &Replyer{channel: channel, seq: req.Seq, codec: this.codec, oneway: req.Oneway}
 	if caller == nil {
 		replyer.Reply(nil, &Error{Code: ErrInvaildMethod, Description: fmt.Sprintf("method %s not found", req.Method)})
 	} else {
 		if atomic.LoadInt32(&this.pause) == 1 {
 			replyer.Reply(nil, &Error{Code: ErrServerPause, Description: "server pause"})
-		} else if err := caller.call(this.codec, replyer, req); err != nil {
-			replyer.Reply(nil, &Error{Code: ErrRuntime, Description: err.Error()})
+		} else {
+			caller.call(this.codec, replyer, req)
 		}
 	}
 }

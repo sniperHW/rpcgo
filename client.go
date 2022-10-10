@@ -57,87 +57,112 @@ func (c *RPCClient) OnRPCMessage(resp *RPCResponseMessage) {
 }
 
 func (c *RPCClient) AsynCall(channel RPCChannel, deadline time.Time, method string, arg interface{}, ret interface{}, respCb func(interface{}, *Error)) func() bool {
-	if b, e := c.codec.Encode(arg); e != nil {
-		go respCb(nil, &Error{Code: ErrEncode, Description: e.Error()})
-		return nil
-	} else {
-		seq := atomic.AddUint64(&c.nextSequence, 1)
-		timeout := deadline.Sub(time.Now())
-		ctx := &callContext{
-			onResponse:   respCb,
-			respReceiver: ret,
-		}
-
-		pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
-
-		pending.Store(seq, ctx)
-
-		ctx.deadlineTimer.Store(time.AfterFunc(timeout, func() {
-			pending.Delete(seq)
-			ctx.callOnResponse(c.codec, nil, &Error{Code: ErrTimeout, Description: "timeout"})
-		}))
-
-		if err := channel.SendRequest(&RPCRequestMessage{
-			Seq:    seq,
+	if nil == respCb {
+		if b, err := c.codec.Encode(arg); err != nil {
+			logger.Sugar().Errorf("encode error:%s", err.Error())
+		} else if err = channel.SendRequest(&RPCRequestMessage{
+			Seq:    atomic.AddUint64(&c.nextSequence, 1),
 			Method: method,
 			Arg:    b,
+			Oneway: true,
 		}, deadline); err != nil {
-			if _, ok := pending.LoadAndDelete(seq); ok {
-				ctx.stopTimer()
-				go ctx.callOnResponse(c.codec, nil, &Error{Code: ErrSend, Description: err.Error()})
-			}
+			logger.Sugar().Errorf("SendRequest error:%s", err.Error())
+		}
+		return nil
+	} else {
+
+		if b, err := c.codec.Encode(arg); err != nil {
+			go respCb(nil, &Error{Code: ErrEncode, Description: err.Error()})
 			return nil
 		} else {
-			return func() bool {
+			seq := atomic.AddUint64(&c.nextSequence, 1)
+			timeout := deadline.Sub(time.Now())
+			ctx := &callContext{
+				onResponse:   respCb,
+				respReceiver: ret,
+			}
+
+			pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
+
+			pending.Store(seq, ctx)
+
+			ctx.deadlineTimer.Store(time.AfterFunc(timeout, func() {
+				pending.Delete(seq)
+				ctx.callOnResponse(c.codec, nil, &Error{Code: ErrTimeout, Description: "timeout"})
+			}))
+
+			if err = channel.SendRequest(&RPCRequestMessage{
+				Seq:    seq,
+				Method: method,
+				Arg:    b,
+			}, deadline); err != nil {
 				if _, ok := pending.LoadAndDelete(seq); ok {
 					ctx.stopTimer()
-					return true
-				} else {
-					return false
+					go ctx.callOnResponse(c.codec, nil, &Error{Code: ErrSend, Description: err.Error()})
+				}
+				return nil
+			} else {
+				return func() bool {
+					if _, ok := pending.LoadAndDelete(seq); ok {
+						ctx.stopTimer()
+						return true
+					} else {
+						return false
+					}
 				}
 			}
 		}
 	}
 }
 
-func (c *RPCClient) Call(ctx context.Context, channel RPCChannel, method string, arg interface{}, ret interface{}) (err *Error) {
+func (c *RPCClient) Call(ctx context.Context, channel RPCChannel, method string, arg interface{}, ret interface{}) *Error {
 	if b, e := c.codec.Encode(arg); e != nil {
 		return &Error{Code: ErrEncode, Description: e.Error()}
 	} else {
-
 		seq := atomic.AddUint64(&c.nextSequence, 1)
+		if ret != nil {
+			waitC := make(chan *Error, 1)
+			pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
 
-		waitC := make(chan []interface{})
-		pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
+			pending.Store(seq, &callContext{
+				respReceiver: ret,
+				onResponse: func(_ interface{}, e *Error) {
+					waitC <- e
+				},
+			})
 
-		pending.Store(seq, &callContext{
-			respReceiver: ret,
-			onResponse: func(_ interface{}, e *Error) {
-				err = e
-				close(waitC)
-			},
-		})
+			if e = channel.SendRequestWithContext(ctx, &RPCRequestMessage{
+				Seq:    seq,
+				Method: method,
+				Arg:    b,
+			}); nil != e {
+				pending.Delete(seq)
+				return &Error{Code: ErrSend, Description: fmt.Sprintf("send error:%s", e.Error())}
+			}
 
-		if sendError := channel.SendRequestWithContext(ctx, &RPCRequestMessage{
-			Seq:    seq,
-			Method: method,
-			Arg:    b,
-		}); nil != sendError {
-			pending.Delete(seq)
-			return &Error{Code: ErrSend, Description: fmt.Sprintf("send error:%v", sendError)}
-		}
-
-		select {
-		case <-waitC:
-		case <-ctx.Done():
-			pending.Delete(seq)
-			if strings.Contains(ctx.Err().Error(), "canceled") {
-				err = &Error{Code: ErrCancel, Description: "canceled"}
+			var err *Error
+			select {
+			case err = <-waitC:
+			case <-ctx.Done():
+				pending.Delete(seq)
+				if strings.Contains(ctx.Err().Error(), "canceled") {
+					err = &Error{Code: ErrCancel, Description: "canceled"}
+				} else {
+					err = &Error{Code: ErrTimeout, Description: "timeout"}
+				}
+			}
+			return err
+		} else {
+			if e = channel.SendRequestWithContext(ctx, &RPCRequestMessage{
+				Seq:    seq,
+				Method: method,
+				Arg:    b,
+				Oneway: true,
+			}); nil != e {
+				return &Error{Code: ErrSend, Description: fmt.Sprintf("send error:%s", e.Error())}
 			} else {
-				err = &Error{Code: ErrTimeout, Description: "timeout"}
+				return nil
 			}
 		}
-
-		return err
 	}
 }

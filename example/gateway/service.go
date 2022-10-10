@@ -16,10 +16,10 @@ func startService(service string) {
 	})
 
 	_, serve, _ := netgo.ListenTCP("tcp", service, func(conn *net.TCPConn) {
-		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
+		codec := &PacketCodec{buff: make([]byte, 4096)}
+		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
 			netgo.AsynSocketOption{
-				Decoder:  &PacketDecoder{},
-				Packer:   &PacketPacker{},
+				Codec:    codec,
 				AutoRecv: true,
 			})
 		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {

@@ -31,10 +31,11 @@ func main() {
 		}
 	}
 
-	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
+	codec := &PacketCodec{buff: make([]byte, 4096)}
+
+	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
 		netgo.AsynSocketOption{
-			Decoder:  &PacketDecoder{},
-			Packer:   &PacketPacker{},
+			Codec:    codec,
 			AutoRecv: true,
 		})
 

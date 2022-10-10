@@ -41,6 +41,7 @@ type RPCRequestMessage struct {
 	Seq    uint64
 	Method string
 	Arg    []byte
+	Oneway bool
 }
 
 type RPCResponseMessage struct {
