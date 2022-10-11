@@ -11,7 +11,7 @@ import (
 func startService(service string) {
 	rpcServer := rpcgo.NewServer(&JsonCodec{})
 
-	rpcServer.RegisterMethod("hello", func(replyer *rpcgo.Replyer, arg *string) {
+	rpcServer.Register("hello", func(replyer *rpcgo.Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
 	})
 
@@ -23,7 +23,7 @@ func startService(service string) {
 				AutoRecv: true,
 			})
 		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
-			rpcServer.OnRPCMessage(&rcpChannel{socket: as}, packet.(*rpcgo.RPCRequestMessage))
+			rpcServer.OnMessage(&rcpChannel{socket: as}, packet.(*rpcgo.RequestMsg))
 			return nil
 		}).Recv()
 	})

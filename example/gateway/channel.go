@@ -13,15 +13,15 @@ type rcpChannel struct {
 	socket *netgo.AsynSocket
 }
 
-func (c *rcpChannel) SendRequest(request *rpcgo.RPCRequestMessage, deadline time.Time) error {
+func (c *rcpChannel) SendRequest(request *rpcgo.RequestMsg, deadline time.Time) error {
 	return c.socket.Send(request, deadline)
 }
 
-func (c *rcpChannel) SendRequestWithContext(ctx context.Context, request *rpcgo.RPCRequestMessage) error {
+func (c *rcpChannel) SendRequestWithContext(ctx context.Context, request *rpcgo.RequestMsg) error {
 	return c.socket.SendWithContext(ctx, request)
 }
 
-func (c *rcpChannel) Reply(response *rpcgo.RPCResponseMessage) error {
+func (c *rcpChannel) Reply(response *rpcgo.ResponseMsg) error {
 	return c.socket.Send(response)
 }
 

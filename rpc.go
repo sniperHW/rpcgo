@@ -19,32 +19,45 @@ func InitLogger(l *zap.Logger) {
  */
 
 type Error struct {
-	Code        int
-	Description string
+	Code int
+	Err  string
+}
+
+func newError(code int, err string) *Error {
+	if code <= 0 || code >= errEnd {
+		return nil
+	} else {
+		return &Error{Code: code, Err: err}
+	}
+}
+
+func (e *Error) Error() string {
+	return e.Err
+}
+
+func (e *Error) Is(code int) bool {
+	return e.Code == code
 }
 
 const (
-	ErrOk                  = 0
-	ErrInvaildMethod       = 1
-	ErrServerPause         = 2
-	ErrBusy                = 3
-	ErrRuntime             = 4
-	ErrTimeout             = 5
-	ErrChannelDisconnected = 6
-	ErrSend                = 7
-	ErrEncode              = 8
-	ErrDecode              = 9
-	ErrCancel              = 10
+	ErrOk = iota
+	ErrInvaildMethod
+	ErrServerPause
+	ErrTimeout
+	ErrSend
+	ErrCancel
+	ErrMethod
+	errEnd
 )
 
-type RPCRequestMessage struct {
+type RequestMsg struct {
 	Seq    uint64
 	Method string
 	Arg    []byte
 	Oneway bool
 }
 
-type RPCResponseMessage struct {
+type ResponseMsg struct {
 	Seq uint64
 	Err *Error
 	Ret []byte
@@ -56,10 +69,10 @@ type Codec interface {
 	Decode([]byte, interface{}) error
 }
 
-type RPCChannel interface {
-	SendRequest(*RPCRequestMessage, time.Time) error
-	SendRequestWithContext(context.Context, *RPCRequestMessage) error
-	Reply(*RPCResponseMessage) error
+type Channel interface {
+	SendRequest(*RequestMsg, time.Time) error
+	SendRequestWithContext(context.Context, *RequestMsg) error
+	Reply(*ResponseMsg) error
 	Name() string
 	Identity() uint64
 }

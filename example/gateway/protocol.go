@@ -97,11 +97,11 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 	switch b[0] {
 	case packet_rpc_request:
-		request := &rpcgo.RPCRequestMessage{}
+		request := &rpcgo.RequestMsg{}
 		json.Unmarshal(b[1:], request)
 		return request, nil
 	case packet_rpc_response:
-		response := &rpcgo.RPCResponseMessage{}
+		response := &rpcgo.ResponseMsg{}
 		json.Unmarshal(b[1:], response)
 		return response, nil
 	default:
@@ -113,13 +113,13 @@ func (codec *PacketCodec) Encode(b []byte, o interface{}) []byte {
 	offset := len(b)
 	var jsonByte []byte
 	switch o.(type) {
-	case *rpcgo.RPCRequestMessage:
-		request := o.(*rpcgo.RPCRequestMessage)
+	case *rpcgo.RequestMsg:
+		request := o.(*rpcgo.RequestMsg)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_request)
 		jsonByte, _ = json.Marshal(request)
-	case *rpcgo.RPCResponseMessage:
-		response := o.(*rpcgo.RPCResponseMessage)
+	case *rpcgo.ResponseMsg:
+		response := o.(*rpcgo.ResponseMsg)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_response)
 		jsonByte, _ = json.Marshal(response)

@@ -56,15 +56,15 @@ type testChannel struct {
 	socket *netgo.AsynSocket
 }
 
-func (c *testChannel) SendRequest(request *RPCRequestMessage, deadline time.Time) error {
+func (c *testChannel) SendRequest(request *RequestMsg, deadline time.Time) error {
 	return c.socket.Send(request, deadline)
 }
 
-func (c *testChannel) SendRequestWithContext(ctx context.Context, request *RPCRequestMessage) error {
+func (c *testChannel) SendRequestWithContext(ctx context.Context, request *RequestMsg) error {
 	return c.socket.SendWithContext(ctx, request)
 }
 
-func (c *testChannel) Reply(response *RPCResponseMessage) error {
+func (c *testChannel) Reply(response *ResponseMsg) error {
 	return c.socket.Send(response)
 }
 
@@ -85,11 +85,11 @@ type PacketCodec struct {
 func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 	switch b[0] {
 	case packet_rpc_request:
-		request := &RPCRequestMessage{}
+		request := &RequestMsg{}
 		json.Unmarshal(b[1:], request)
 		return request, nil
 	case packet_rpc_response:
-		response := &RPCResponseMessage{}
+		response := &ResponseMsg{}
 		json.Unmarshal(b[1:], response)
 		return response, nil
 	case packet_msg:
@@ -104,13 +104,13 @@ func (codec *PacketCodec) Encode(b []byte, o interface{}) []byte {
 	offset := len(b)
 	var bytes []byte
 	switch o.(type) {
-	case *RPCRequestMessage:
-		request := o.(*RPCRequestMessage)
+	case *RequestMsg:
+		request := o.(*RequestMsg)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_request)
 		bytes, _ = json.Marshal(request)
-	case *RPCResponseMessage:
-		response := o.(*RPCResponseMessage)
+	case *ResponseMsg:
+		response := o.(*ResponseMsg)
 		b = AppendUint32(b, 0)
 		b = AppendByte(b, packet_rpc_response)
 		bytes, _ = json.Marshal(response)
@@ -185,11 +185,11 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
-	rpcServer.RegisterMethod("hello", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("hello", func(replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
 	})
 
-	rpcServer.RegisterMethod("timeout", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("timeout", func(replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
 			logger.Sugar().Debugf("timeout reply")
@@ -210,8 +210,8 @@ func TestRPC(t *testing.T) {
 			case string:
 				logger.Sugar().Debugf("on message")
 				as.Send(packet)
-			case *RPCRequestMessage:
-				rpcServer.OnRPCMessage(&testChannel{socket: as}, packet.(*RPCRequestMessage))
+			case *RequestMsg:
+				rpcServer.OnMessage(&testChannel{socket: as}, packet.(*RequestMsg))
 			}
 			return nil
 		}).Recv()
@@ -236,8 +236,8 @@ func TestRPC(t *testing.T) {
 		switch packet.(type) {
 		case string:
 			close(msgChan)
-		case *RPCResponseMessage:
-			rpcClient.OnRPCMessage(packet.(*RPCResponseMessage))
+		case *ResponseMsg:
+			rpcClient.OnMessage(packet.(*ResponseMsg))
 		}
 		return nil
 	}).Recv()
@@ -253,7 +253,7 @@ func TestRPC(t *testing.T) {
 
 	c := make(chan struct{})
 
-	rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "hello", "hw", &resp, func(resp interface{}, err *Error) {
+	rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "hello", "hw", &resp, func(resp interface{}, err error) {
 		assert.Equal(t, *resp.(*string), "hello world:hw")
 		close(c)
 	})
@@ -263,10 +263,10 @@ func TestRPC(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 	defer cancel()
 	err = rpcClient.Call(ctx, rpcChannel, "timeout", "sniperHW", &resp)
-	assert.Equal(t, err.Code, ErrTimeout)
+	assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
 
 	{
-		cancel := rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err *Error) {
+		cancel := rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err error) {
 			assert.Equal(t, *resp.(*string), "hello world:hw")
 			panic("should not reach here")
 		})
@@ -280,7 +280,7 @@ func TestRPC(t *testing.T) {
 
 	c = make(chan struct{})
 
-	rpcServer.RegisterMethod("syncOneway", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("syncOneway", func(replyer *Replyer, arg *string) {
 		logger.Sugar().Debugf("syncOneway %s", *arg)
 		replyer.Reply(*arg, nil)
 		close(c)
@@ -292,41 +292,34 @@ func TestRPC(t *testing.T) {
 
 	c = make(chan struct{})
 
-	rpcServer.RegisterMethod("ayncOneway", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("ayncOneway", func(replyer *Replyer, arg *string) {
 		logger.Sugar().Debugf("ayncOneway %s", *arg)
 		replyer.Reply(*arg, nil)
 		close(c)
 	})
 
-	rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "ayncOneway", "hw", nil, nil)
+	rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "ayncOneway", "hw", nil, nil)
 
 	<-c
 
 	c = make(chan struct{})
 
-	rpcClient.AsynCall(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err *Error) {
-		assert.Equal(t, err.Code, ErrTimeout)
+	rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err error) {
+		assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
 		close(c)
 	})
 
 	<-c
 
-	err = rpcClient.Call(context.TODO(), rpcChannel, "invaild method", "sniperHW", &resp)
-	assert.Equal(t, err.Code, ErrInvaildMethod)
+	rpcServer.UnRegister("hello")
 
-	rpcServer.RegisterMethod("panic", func(replyer *Replyer, arg *string) {
-		replyer = nil
-		//should panic here
-		replyer.Reply(*arg, nil)
-	})
-
-	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)
-	assert.Equal(t, err.Code, ErrRuntime)
+	err = rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
+	assert.Equal(t, err.(*Error).Is(ErrInvaildMethod), true)
 
 	rpcServer.Pause()
 
 	err = rpcClient.Call(context.TODO(), rpcChannel, "timeout", "sniperHW", &resp)
-	assert.Equal(t, err.Code, ErrServerPause)
+	assert.Equal(t, err.(*Error).Is(ErrServerPause), true)
 
 	as.Close(nil)
 
