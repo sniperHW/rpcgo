@@ -205,7 +205,7 @@ func TestRPC(t *testing.T) {
 				Codec:    codec,
 				AutoRecv: true,
 			})
-		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
+		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
 			switch packet.(type) {
 			case string:
 				logger.Sugar().Debugf("on message")
@@ -213,6 +213,7 @@ func TestRPC(t *testing.T) {
 			case *RPCRequestMessage:
 				rpcServer.OnRPCMessage(&testChannel{socket: as}, packet.(*RPCRequestMessage))
 			}
+			return nil
 		}).Recv()
 	})
 
@@ -231,13 +232,14 @@ func TestRPC(t *testing.T) {
 
 	rpcChannel := &testChannel{socket: as}
 	rpcClient := NewClient(&JsonCodec{})
-	as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
+	as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
 		switch packet.(type) {
 		case string:
 			close(msgChan)
 		case *RPCResponseMessage:
 			rpcClient.OnRPCMessage(packet.(*RPCResponseMessage))
 		}
+		return nil
 	}).Recv()
 	as.Send("msg")
 	<-msgChan

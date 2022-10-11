@@ -22,8 +22,9 @@ func startService(service string) {
 				Codec:    codec,
 				AutoRecv: true,
 			})
-		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
+		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
 			rpcServer.OnRPCMessage(&rcpChannel{socket: as}, packet.(*rpcgo.RPCRequestMessage))
+			return nil
 		}).Recv()
 	})
 
