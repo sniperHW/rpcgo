@@ -316,6 +316,15 @@ func TestRPC(t *testing.T) {
 	err = rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
 	assert.Equal(t, err.(*Error).Is(ErrInvaildMethod), true)
 
+	rpcServer.Register("panic", func(replyer *Replyer, arg *string) {
+		replyer = nil
+		//cause panic
+		replyer.Reply(*arg, nil)
+	})
+
+	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)
+	assert.Equal(t, err.Error(), "method panic")
+
 	rpcServer.Pause()
 
 	err = rpcClient.Call(context.TODO(), rpcChannel, "timeout", "sniperHW", &resp)

@@ -47,6 +47,7 @@ const (
 	ErrSend
 	ErrCancel
 	ErrMethod
+	ErrOther
 	errEnd
 )
 
