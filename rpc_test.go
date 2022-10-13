@@ -185,11 +185,11 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
-	rpcServer.Register("hello", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
 	})
 
-	rpcServer.Register("timeout", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
 			logger.Sugar().Debugf("timeout reply")
@@ -205,13 +205,13 @@ func TestRPC(t *testing.T) {
 				Codec:    codec,
 				AutoRecv: true,
 			})
-		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
+		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
 			switch packet.(type) {
 			case string:
 				logger.Sugar().Debugf("on message")
 				as.Send(packet)
 			case *RequestMsg:
-				rpcServer.OnMessage(&testChannel{socket: as}, packet.(*RequestMsg))
+				rpcServer.OnMessage(context, &testChannel{socket: as}, packet.(*RequestMsg))
 			}
 			return nil
 		}).Recv()
@@ -232,12 +232,12 @@ func TestRPC(t *testing.T) {
 
 	rpcChannel := &testChannel{socket: as}
 	rpcClient := NewClient(&JsonCodec{})
-	as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
+	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
 		switch packet.(type) {
 		case string:
 			close(msgChan)
 		case *ResponseMsg:
-			rpcClient.OnMessage(packet.(*ResponseMsg))
+			rpcClient.OnMessage(context, packet.(*ResponseMsg))
 		}
 		return nil
 	}).Recv()
@@ -280,7 +280,7 @@ func TestRPC(t *testing.T) {
 
 	c = make(chan struct{})
 
-	rpcServer.Register("syncOneway", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("syncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
 		logger.Sugar().Debugf("syncOneway %s", *arg)
 		replyer.Reply(*arg, nil)
 		close(c)
@@ -292,7 +292,7 @@ func TestRPC(t *testing.T) {
 
 	c = make(chan struct{})
 
-	rpcServer.Register("ayncOneway", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("ayncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
 		logger.Sugar().Debugf("ayncOneway %s", *arg)
 		replyer.Reply(*arg, nil)
 		close(c)
@@ -316,7 +316,7 @@ func TestRPC(t *testing.T) {
 	err = rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
 	assert.Equal(t, err.(*Error).Is(ErrInvaildMethod), true)
 
-	rpcServer.Register("panic", func(replyer *Replyer, arg *string) {
+	rpcServer.Register("panic", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer = nil
 		//cause panic
 		replyer.Reply(*arg, nil)

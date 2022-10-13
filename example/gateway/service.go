@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/sniperHW/netgo"
 	"github.com/sniperHW/rpcgo"
@@ -11,7 +12,7 @@ import (
 func startService(service string) {
 	rpcServer := rpcgo.NewServer(&JsonCodec{})
 
-	rpcServer.Register("hello", func(replyer *rpcgo.Replyer, arg *string) {
+	rpcServer.Register("hello", func(context context.Context, replyer *rpcgo.Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
 	})
 
@@ -22,8 +23,8 @@ func startService(service string) {
 				Codec:    codec,
 				AutoRecv: true,
 			})
-		as.SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
-			rpcServer.OnMessage(&rcpChannel{socket: as}, packet.(*rpcgo.RequestMsg))
+		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
+			rpcServer.OnMessage(context, &rcpChannel{socket: as}, packet.(*rpcgo.RequestMsg))
 			return nil
 		}).Recv()
 	})

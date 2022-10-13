@@ -41,8 +41,8 @@ func main() {
 
 	channel := &rcpChannel{socket: as}
 	rpcClient := rpcgo.NewClient(&JsonCodec{})
-	as.SetPacketHandler(func(as *netgo.AsynSocket, resp interface{}) error {
-		rpcClient.OnMessage(resp.(*rpcgo.ResponseMsg))
+	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, resp interface{}) error {
+		rpcClient.OnMessage(context, resp.(*rpcgo.ResponseMsg))
 		return nil
 	}).Recv()
 

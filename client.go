@@ -48,7 +48,7 @@ func NewClient(codec Codec) *Client {
 	}
 }
 
-func (c *Client) OnMessage(resp *ResponseMsg) {
+func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
 	if ctx, ok := c.pendingCall[int(resp.Seq)%len(c.pendingCall)].LoadAndDelete(resp.Seq); ok {
 		ctx.(*callContext).stopTimer()
 		ctx.(*callContext).callOnResponse(c.codec, resp.Ret, resp.Err)

@@ -1,6 +1,7 @@
 package rpcgo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -48,7 +49,7 @@ type methodCaller struct {
 	fn      interface{}
 }
 
-//接受的method func(*Replyer,*Pointer)
+//接受的method func(context.Context, *Replyer,*Pointer)
 func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 	if method == nil {
 		return nil, errors.New("method is nil")
@@ -56,23 +57,27 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 
 	fnType := reflect.TypeOf(method)
 	if fnType.Kind() != reflect.Func {
-		return nil, errors.New("method should have type func(*Replyer,*Pointer)")
+		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
 	}
 
-	if fnType.NumIn() != 2 {
-		return nil, errors.New("method should have type func(*Replyer,*Pointer)")
+	if fnType.NumIn() != 3 {
+		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
 	}
 
-	if fnType.In(0) != reflect.TypeOf(&Replyer{}) {
-		return nil, errors.New("method should have type func(*Replyer,*Pointer)")
+	if !fnType.In(0).Implements(reflect.TypeOf((*context.Context)(nil)).Elem()) {
+		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
 	}
 
-	if fnType.In(1).Kind() != reflect.Ptr {
-		return nil, errors.New("method should have type func(*Replyer,*Pointer)")
+	if fnType.In(1) != reflect.TypeOf(&Replyer{}) {
+		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
+	}
+
+	if fnType.In(2).Kind() != reflect.Ptr {
+		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
 	}
 
 	caller := &methodCaller{
-		argType: fnType.In(1).Elem(),
+		argType: fnType.In(2).Elem(),
 		fn:      method,
 		name:    name,
 	}
@@ -80,7 +85,7 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 	return caller, nil
 }
 
-func (c *methodCaller) call(codec Codec, replyer *Replyer, req *RequestMsg) {
+func (c *methodCaller) call(context context.Context, codec Codec, replyer *Replyer, req *RequestMsg) {
 	arg := reflect.New(c.argType).Interface()
 	if err := codec.Decode(req.Arg, arg); err == nil {
 		defer func() {
@@ -91,7 +96,7 @@ func (c *methodCaller) call(codec Codec, replyer *Replyer, req *RequestMsg) {
 				replyer.Reply(nil, newError(ErrOther, "method panic"))
 			}
 		}()
-		reflect.ValueOf(c.fn).Call([]reflect.Value{reflect.ValueOf(replyer), reflect.ValueOf(arg)})
+		reflect.ValueOf(c.fn).Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 	} else {
 		logger.Sugar().Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
 		replyer.Reply(nil, newError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
@@ -148,13 +153,13 @@ func (this *Server) method(name string) *methodCaller {
 	return this.methods[name]
 }
 
-func (this *Server) OnMessage(channel Channel, req *RequestMsg) {
+func (this *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
 	replyer := &Replyer{channel: channel, seq: req.Seq, codec: this.codec, oneway: req.Oneway}
 	if caller := this.method(req.Method); caller == nil {
 		replyer.Reply(nil, newError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
 	} else if atomic.LoadInt32(&this.pause) == 1 {
 		replyer.Reply(nil, newError(ErrServerPause, "server pause"))
 	} else {
-		caller.call(this.codec, replyer, req)
+		caller.call(context, this.codec, replyer, req)
 	}
 }
