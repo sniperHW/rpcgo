@@ -3,7 +3,6 @@ package rpcgo
 import (
 	"context"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,55 +60,53 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 	if b, err := c.codec.Encode(arg); err != nil {
 		logger.Sugar().Panicf("encode error:%v", err)
 		return nil
-	} else if respCb == nil || ret == nil {
-		if err = channel.SendRequest(&RequestMsg{
+	} else {
+		reqMessage := &RequestMsg{
 			Seq:    atomic.AddUint64(&c.nextSequence, 1),
 			Method: method,
 			Arg:    b,
-			Oneway: true,
-		}, deadline); err != nil {
-			logger.Sugar().Errorf("SendRequest error:%v", err)
 		}
-		return nil
-	} else {
-		seq := atomic.AddUint64(&c.nextSequence, 1)
-		timeout := deadline.Sub(time.Now())
-		ctx := &callContext{
-			onResponse:   respCb,
-			respReceiver: ret,
-		}
-
-		pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
-
-		pending.Store(seq, ctx)
-
-		ctx.deadlineTimer.Store(time.AfterFunc(timeout, func() {
-			if _, ok := pending.LoadAndDelete(seq); ok {
-				ctx.callOnResponse(c.codec, nil, newError(ErrTimeout, "timeout"))
-			}
-		}))
-
-		if err = channel.SendRequest(&RequestMsg{
-			Seq:    seq,
-			Method: method,
-			Arg:    b,
-		}, deadline); err != nil {
-			if _, ok := pending.LoadAndDelete(seq); ok {
-				ctx.stopTimer()
-				if e, ok := err.(net.Error); ok && e.Timeout() {
-					go ctx.callOnResponse(c.codec, nil, newError(ErrTimeout, "timeout"))
-				} else {
-					go ctx.callOnResponse(c.codec, nil, newError(ErrSend, err.Error()))
-				}
+		if respCb == nil || ret == nil {
+			reqMessage.Oneway = true
+			if err = channel.SendRequest(reqMessage, deadline); err != nil {
+				logger.Sugar().Errorf("SendRequest error:%v", err)
 			}
 			return nil
 		} else {
-			return func() bool {
-				if _, ok := pending.LoadAndDelete(seq); ok {
+
+			ctx := &callContext{
+				onResponse:   respCb,
+				respReceiver: ret,
+			}
+
+			pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
+
+			pending.Store(reqMessage.Seq, ctx)
+
+			ctx.deadlineTimer.Store(time.AfterFunc(deadline.Sub(time.Now()), func() {
+				if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
+					ctx.callOnResponse(c.codec, nil, newError(ErrTimeout, "timeout"))
+				}
+			}))
+
+			if err = channel.SendRequest(reqMessage, deadline); err != nil {
+				if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
 					ctx.stopTimer()
-					return true
-				} else {
-					return false
+					if e, ok := err.(net.Error); ok && e.Timeout() {
+						go ctx.callOnResponse(c.codec, nil, newError(ErrTimeout, "timeout"))
+					} else {
+						go ctx.callOnResponse(c.codec, nil, newError(ErrSend, err.Error()))
+					}
+				}
+				return nil
+			} else {
+				return func() bool {
+					if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
+						ctx.stopTimer()
+						return true
+					} else {
+						return false
+					}
 				}
 			}
 		}
@@ -121,24 +118,24 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 		logger.Sugar().Panicf("encode error:%v", err)
 		return nil
 	} else {
-		seq := atomic.AddUint64(&c.nextSequence, 1)
+		reqMessage := &RequestMsg{
+			Seq:    atomic.AddUint64(&c.nextSequence, 1),
+			Method: method,
+			Arg:    b,
+		}
 		if ret != nil {
 			waitC := make(chan error, 1)
-			pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
+			pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
 
-			pending.Store(seq, &callContext{
+			pending.Store(reqMessage.Seq, &callContext{
 				respReceiver: ret,
 				onResponse: func(_ interface{}, err error) {
 					waitC <- err
 				},
 			})
 
-			if err = channel.SendRequestWithContext(ctx, &RequestMsg{
-				Seq:    seq,
-				Method: method,
-				Arg:    b,
-			}); err != nil {
-				pending.Delete(seq)
+			if err = channel.SendRequestWithContext(ctx, reqMessage); err != nil {
+				pending.Delete(reqMessage.Seq)
 				if e, ok := err.(net.Error); ok && e.Timeout() {
 					return newError(ErrTimeout, "timeout")
 				} else {
@@ -150,20 +147,19 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			case err := <-waitC:
 				return err
 			case <-ctx.Done():
-				pending.Delete(seq)
-				if strings.Contains(ctx.Err().Error(), "canceled") {
+				pending.Delete(reqMessage.Seq)
+				switch ctx.Err() {
+				case context.Canceled:
 					return newError(ErrCancel, "canceled")
-				} else {
+				case context.DeadlineExceeded:
 					return newError(ErrTimeout, "timeout")
+				default:
+					return newError(ErrOther, "unknow")
 				}
 			}
 		} else {
-			if err = channel.SendRequestWithContext(ctx, &RequestMsg{
-				Seq:    seq,
-				Method: method,
-				Arg:    b,
-				Oneway: true,
-			}); nil != err {
+			reqMessage.Oneway = true
+			if err = channel.SendRequestWithContext(ctx, reqMessage); nil != err {
 				if e, ok := err.(net.Error); ok && e.Timeout() {
 					return newError(ErrTimeout, "timeout")
 				} else {
