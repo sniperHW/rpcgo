@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/sniperHW/netgo"
 	"github.com/sniperHW/rpcgo"
+	"net"
 	"time"
 )
 
@@ -109,26 +110,26 @@ func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 	}
 }
 
-func (codec *PacketCodec) Encode(b []byte, o interface{}) []byte {
-	offset := len(b)
-	var jsonByte []byte
+func (codec *PacketCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers, int) {
+	var headBytes []byte
+	var dataBytes []byte
 	switch o.(type) {
 	case *rpcgo.RequestMsg:
 		request := o.(*rpcgo.RequestMsg)
-		b = AppendUint32(b, 0)
-		b = AppendByte(b, packet_rpc_request)
-		jsonByte, _ = json.Marshal(request)
+		headBytes = AppendUint32(headBytes, 0)
+		headBytes = AppendByte(headBytes, packet_rpc_request)
+		dataBytes, _ = json.Marshal(request)
 	case *rpcgo.ResponseMsg:
 		response := o.(*rpcgo.ResponseMsg)
-		b = AppendUint32(b, 0)
-		b = AppendByte(b, packet_rpc_response)
-		jsonByte, _ = json.Marshal(response)
+		headBytes = AppendUint32(headBytes, 0)
+		headBytes = AppendByte(headBytes, packet_rpc_response)
+		dataBytes, _ = json.Marshal(response)
 	default:
-		return b
+		return buffs, 0
 	}
-	b = AppendBytes(b, jsonByte)
-	binary.BigEndian.PutUint32(b[offset:], uint32(len(b)-offset-4))
-	return b
+
+	binary.BigEndian.PutUint32(headBytes, uint32(len(dataBytes)+1))
+	return append(buffs, headBytes, dataBytes), len(dataBytes) + 5
 }
 
 type JsonCodec struct {

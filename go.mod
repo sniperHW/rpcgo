@@ -3,7 +3,7 @@ module github.com/sniperHW/rpcgo
 go 1.18
 
 require (
-	github.com/sniperHW/netgo v0.0.0-20221012124353-fed0f247c463
+	github.com/sniperHW/netgo v0.0.0-20221014012016-06baf0ad38c6
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/zap v1.23.0
 )

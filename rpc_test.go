@@ -99,32 +99,31 @@ func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 	}
 }
 
-func (codec *PacketCodec) Encode(b []byte, o interface{}) []byte {
+func (codec *PacketCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers, int) {
 	logger.Sugar().Debugf("pack %v", o)
-	offset := len(b)
-	var bytes []byte
+	var headBytes []byte
+	var dataBytes []byte
 	switch o.(type) {
 	case *RequestMsg:
 		request := o.(*RequestMsg)
-		b = AppendUint32(b, 0)
-		b = AppendByte(b, packet_rpc_request)
-		bytes, _ = json.Marshal(request)
+		headBytes = AppendUint32(headBytes, 0)
+		headBytes = AppendByte(headBytes, packet_rpc_request)
+		dataBytes, _ = json.Marshal(request)
 	case *ResponseMsg:
 		response := o.(*ResponseMsg)
-		b = AppendUint32(b, 0)
-		b = AppendByte(b, packet_rpc_response)
-		bytes, _ = json.Marshal(response)
+		headBytes = AppendUint32(headBytes, 0)
+		headBytes = AppendByte(headBytes, packet_rpc_response)
+		dataBytes, _ = json.Marshal(response)
 	case string:
-		b = AppendUint32(b, 0)
-		b = AppendByte(b, packet_msg)
-		bytes = []byte(o.(string))
+		headBytes = AppendUint32(headBytes, 0)
+		headBytes = AppendByte(headBytes, packet_msg)
+		dataBytes = []byte(o.(string))
 	default:
-		return b
+		return buffs, 0
 	}
-	b = AppendBytes(b, bytes)
-	binary.BigEndian.PutUint32(b[offset:], uint32(len(b)-offset-4))
-	logger.Sugar().Debugf("len %d", len(b))
-	return b
+
+	binary.BigEndian.PutUint32(headBytes, uint32(len(dataBytes)+1))
+	return append(buffs, headBytes, dataBytes), len(dataBytes) + 5
 }
 
 func (codec *PacketCodec) read(readable netgo.ReadAble, deadline time.Time) (int, error) {
