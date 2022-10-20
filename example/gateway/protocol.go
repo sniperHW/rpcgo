@@ -4,10 +4,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"github.com/sniperHW/netgo"
-	"github.com/sniperHW/rpcgo"
 	"net"
 	"time"
+
+	"github.com/sniperHW/netgo"
+	"github.com/sniperHW/rpcgo"
 )
 
 const (
@@ -49,7 +50,7 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 	for {
 		rr := codec.r
 		pktLen := 0
-		if (codec.w-rr) >= lenHead && uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
+		if (codec.w - rr) >= lenHead { //&& uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
 			pktLen = int(binary.BigEndian.Uint32(codec.buff[rr:]))
 			rr += lenHead
 		}

@@ -8,13 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sniperHW/netgo"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 	"net"
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/sniperHW/netgo"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 type JsonCodec struct {
@@ -139,7 +140,7 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 	for {
 		rr := codec.r
 		pktLen := 0
-		if (codec.w-rr) >= lenHead && uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
+		if (codec.w - rr) >= lenHead { //&& uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
 			pktLen = int(binary.BigEndian.Uint32(codec.buff[rr:]))
 			logger.Sugar().Debugf("on packet pktLen %d", pktLen)
 			rr += lenHead
