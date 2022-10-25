@@ -2,16 +2,17 @@ package main
 
 import (
 	"context"
-	"github.com/sniperHW/netgo"
-	"github.com/sniperHW/rpcgo"
-	"go.uber.org/zap"
 	"log"
 	"net"
 	"time"
+
+	"github.com/sniperHW/netgo"
+	"github.com/sniperHW/rpcgo"
+	"go.uber.org/zap"
 )
 
 func main() {
-	l := zap.NewExample()
+	l := zap.NewExample().Sugar()
 	rpcgo.InitLogger(l)
 
 	go startService("localhost:8110")

@@ -114,17 +114,15 @@ func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 func (codec *PacketCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers, int) {
 	var headBytes []byte
 	var dataBytes []byte
-	switch o.(type) {
+	switch o := o.(type) {
 	case *rpcgo.RequestMsg:
-		request := o.(*rpcgo.RequestMsg)
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_request)
-		dataBytes, _ = json.Marshal(request)
+		dataBytes, _ = json.Marshal(o)
 	case *rpcgo.ResponseMsg:
-		response := o.(*rpcgo.ResponseMsg)
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_response)
-		dataBytes, _ = json.Marshal(response)
+		dataBytes, _ = json.Marshal(o)
 	default:
 		return buffs, 0
 	}

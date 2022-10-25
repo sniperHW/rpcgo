@@ -25,7 +25,7 @@ func (this *Replyer) Reply(ret interface{}, err error) {
 		}
 		if nil == err {
 			if b, e := this.codec.Encode(ret); e != nil {
-				logger.Sugar().Panicf("send rpc response to (%s) encode ret error:%s\n", this.channel.Name(), e.Error())
+				logger.Panicf("send rpc response to (%s) encode ret error:%s\n", this.channel.Name(), e.Error())
 			} else {
 				resp.Ret = b
 			}
@@ -38,7 +38,7 @@ func (this *Replyer) Reply(ret interface{}, err error) {
 		}
 
 		if e := this.channel.Reply(resp); e != nil {
-			logger.Sugar().Errorf("send rpc response to (%s) error:%s\n", this.channel.Name(), e.Error())
+			logger.Errorf("send rpc response to (%s) error:%s\n", this.channel.Name(), e.Error())
 		}
 	}
 }
@@ -49,7 +49,7 @@ type methodCaller struct {
 	fn      interface{}
 }
 
-//接受的method func(context.Context, *Replyer,*Pointer)
+// 接受的method func(context.Context, *Replyer,*Pointer)
 func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 	if method == nil {
 		return nil, errors.New("method is nil")
@@ -92,13 +92,13 @@ func (c *methodCaller) call(context context.Context, codec Codec, replyer *Reply
 			if r := recover(); r != nil {
 				buf := make([]byte, 65535)
 				l := runtime.Stack(buf, false)
-				logger.Sugar().Errorf("method:%s channel:%s %s", c.name, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
+				logger.Errorf("method:%s channel:%s %s", c.name, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
 				replyer.Reply(nil, newError(ErrOther, "method panic"))
 			}
 		}()
 		reflect.ValueOf(c.fn).Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 	} else {
-		logger.Sugar().Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
+		logger.Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
 		replyer.Reply(nil, newError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
 	}
 }

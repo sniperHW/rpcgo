@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/sniperHW/netgo"
-	"github.com/sniperHW/rpcgo"
 	"time"
 	"unsafe"
+
+	"github.com/sniperHW/netgo"
+	"github.com/sniperHW/rpcgo"
 )
 
 type rcpChannel struct {

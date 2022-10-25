@@ -21,7 +21,7 @@ func (this *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
 	if atomic.CompareAndSwapInt32(&this.fired, 0, 1) {
 		if err == nil {
 			if e := codec.Decode(resp, this.respReceiver); e != nil {
-				logger.Sugar().Panicf("callOnResponse decode error:%v", e)
+				logger.Panicf("callOnResponse decode error:%v", e)
 			}
 		}
 
@@ -52,13 +52,13 @@ func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
 		ctx.(*callContext).stopTimer()
 		ctx.(*callContext).callOnResponse(c.codec, resp.Ret, resp.Err)
 	} else {
-		logger.Sugar().Infof("onResponse with no reqContext:%d", resp.Seq)
+		logger.Infof("onResponse with no reqContext:%d", resp.Seq)
 	}
 }
 
 func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method string, arg interface{}, ret interface{}, respCb RespCB) func() bool {
 	if b, err := c.codec.Encode(arg); err != nil {
-		logger.Sugar().Panicf("encode error:%v", err)
+		logger.Panicf("encode error:%v", err)
 		return nil
 	} else {
 		reqMessage := &RequestMsg{
@@ -69,7 +69,7 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 		if respCb == nil || ret == nil {
 			reqMessage.Oneway = true
 			if err = channel.SendRequest(reqMessage, deadline); err != nil {
-				logger.Sugar().Errorf("SendRequest error:%v", err)
+				logger.Errorf("SendRequest error:%v", err)
 			}
 			return nil
 		} else {
@@ -115,7 +115,7 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 
 func (c *Client) Call(ctx context.Context, channel Channel, method string, arg interface{}, ret interface{}) error {
 	if b, err := c.codec.Encode(arg); err != nil {
-		logger.Sugar().Panicf("encode error:%v", err)
+		logger.Panicf("encode error:%v", err)
 		return nil
 	} else {
 		reqMessage := &RequestMsg{

@@ -2,13 +2,12 @@ package rpcgo
 
 import (
 	"context"
-	"go.uber.org/zap"
 	"time"
 )
 
-var logger *zap.Logger
+var logger Logger
 
-func InitLogger(l *zap.Logger) {
+func InitLogger(l Logger) {
 	logger = l
 }
 
@@ -64,7 +63,7 @@ type ResponseMsg struct {
 	Ret []byte
 }
 
-//encode/decode Arg/Ret
+// encode/decode Arg/Ret
 type Codec interface {
 	Encode(interface{}) ([]byte, error)
 	Decode([]byte, interface{}) error
