@@ -18,14 +18,14 @@ type Replyer struct {
 	oneway  bool
 }
 
-func (this *Replyer) Reply(ret interface{}, err error) {
-	if !this.oneway && atomic.CompareAndSwapInt32(&this.replyed, 0, 1) {
+func (r *Replyer) Reply(ret interface{}, err error) {
+	if !r.oneway && atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
 		resp := &ResponseMsg{
-			Seq: this.seq,
+			Seq: r.seq,
 		}
 		if nil == err {
-			if b, e := this.codec.Encode(ret); e != nil {
-				logger.Panicf("send rpc response to (%s) encode ret error:%s\n", this.channel.Name(), e.Error())
+			if b, e := r.codec.Encode(ret); e != nil {
+				logger.Panicf("send rpc response to (%s) encode ret error:%s\n", r.channel.Name(), e.Error())
 			} else {
 				resp.Ret = b
 			}
@@ -37,10 +37,14 @@ func (this *Replyer) Reply(ret interface{}, err error) {
 			}
 		}
 
-		if e := this.channel.Reply(resp); e != nil {
-			logger.Errorf("send rpc response to (%s) error:%s\n", this.channel.Name(), e.Error())
+		if e := r.channel.Reply(resp); e != nil {
+			logger.Errorf("send rpc response to (%s) error:%s\n", r.channel.Name(), e.Error())
 		}
 	}
+}
+
+func (r *Replyer) Channel() Channel {
+	return r.channel
 }
 
 type methodCaller struct {
@@ -116,50 +120,50 @@ func NewServer(codec Codec) *Server {
 		codec:   codec}
 }
 
-func (this *Server) Pause() {
-	atomic.StoreInt32(&this.pause, 1)
+func (s *Server) Pause() {
+	atomic.StoreInt32(&s.pause, 1)
 }
 
-func (this *Server) Resume() {
-	atomic.StoreInt32(&this.pause, 0)
+func (s *Server) Resume() {
+	atomic.StoreInt32(&s.pause, 0)
 }
 
-func (this *Server) Register(name string, method interface{}) error {
-	this.Lock()
-	defer this.Unlock()
+func (s *Server) Register(name string, method interface{}) error {
+	s.Lock()
+	defer s.Unlock()
 	if name == "" {
 		return errors.New("RegisterMethod nams is nil")
 	} else if caller, err := makeMethodCaller(name, method); err != nil {
 		return err
 	} else {
-		if _, ok := this.methods[name]; ok {
+		if _, ok := s.methods[name]; ok {
 			return fmt.Errorf("duplicate method:%s", name)
 		} else {
-			this.methods[name] = caller
+			s.methods[name] = caller
 			return nil
 		}
 	}
 }
 
-func (this *Server) UnRegister(name string) {
-	this.Lock()
-	defer this.Unlock()
-	delete(this.methods, name)
+func (s *Server) UnRegister(name string) {
+	s.Lock()
+	defer s.Unlock()
+	delete(s.methods, name)
 }
 
-func (this *Server) method(name string) *methodCaller {
-	this.RLock()
-	defer this.RUnlock()
-	return this.methods[name]
+func (s *Server) method(name string) *methodCaller {
+	s.RLock()
+	defer s.RUnlock()
+	return s.methods[name]
 }
 
-func (this *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
-	replyer := &Replyer{channel: channel, seq: req.Seq, codec: this.codec, oneway: req.Oneway}
-	if caller := this.method(req.Method); caller == nil {
+func (s *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
+	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway}
+	if caller := s.method(req.Method); caller == nil {
 		replyer.Reply(nil, newError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
-	} else if atomic.LoadInt32(&this.pause) == 1 {
+	} else if atomic.LoadInt32(&s.pause) == 1 {
 		replyer.Reply(nil, newError(ErrServerPause, "server pause"))
 	} else {
-		caller.call(context, this.codec, replyer, req)
+		caller.call(context, s.codec, replyer, req)
 	}
 }

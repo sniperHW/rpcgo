@@ -17,20 +17,20 @@ type callContext struct {
 	respReceiver  interface{}
 }
 
-func (this *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
-	if atomic.CompareAndSwapInt32(&this.fired, 0, 1) {
+func (c *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
+	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
 		if err == nil {
-			if e := codec.Decode(resp, this.respReceiver); e != nil {
+			if e := codec.Decode(resp, c.respReceiver); e != nil {
 				logger.Panicf("callOnResponse decode error:%v", e)
 			}
 		}
 
-		this.onResponse(this.respReceiver, err)
+		c.onResponse(c.respReceiver, err)
 	}
 }
 
-func (this *callContext) stopTimer() {
-	if t, ok := this.deadlineTimer.Load().(*time.Timer); ok {
+func (c *callContext) stopTimer() {
+	if t, ok := c.deadlineTimer.Load().(*time.Timer); ok {
 		t.Stop()
 	}
 }
