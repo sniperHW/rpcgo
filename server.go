@@ -33,7 +33,7 @@ func (r *Replyer) Reply(ret interface{}, err error) {
 			if _, ok := err.(*Error); ok {
 				resp.Err = err.(*Error)
 			} else {
-				resp.Err = newError(ErrMethod, err.Error())
+				resp.Err = NewError(ErrMethod, err.Error())
 			}
 		}
 
@@ -97,13 +97,13 @@ func (c *methodCaller) call(context context.Context, codec Codec, replyer *Reply
 				buf := make([]byte, 65535)
 				l := runtime.Stack(buf, false)
 				logger.Errorf("method:%s channel:%s %s", c.name, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
-				replyer.Reply(nil, newError(ErrOther, "method panic"))
+				replyer.Reply(nil, NewError(ErrOther, "method panic"))
 			}
 		}()
 		reflect.ValueOf(c.fn).Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 	} else {
 		logger.Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
-		replyer.Reply(nil, newError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
+		replyer.Reply(nil, NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
 	}
 }
 
@@ -160,9 +160,9 @@ func (s *Server) method(name string) *methodCaller {
 func (s *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
 	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway}
 	if caller := s.method(req.Method); caller == nil {
-		replyer.Reply(nil, newError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
+		replyer.Reply(nil, NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
 	} else if atomic.LoadInt32(&s.pause) == 1 {
-		replyer.Reply(nil, newError(ErrServerPause, "server pause"))
+		replyer.Reply(nil, NewError(ErrServerPause, "server pause"))
 	} else {
 		caller.call(context, s.codec, replyer, req)
 	}

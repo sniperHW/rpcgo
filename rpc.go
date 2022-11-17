@@ -22,7 +22,7 @@ type Error struct {
 	Err  string
 }
 
-func newError(code int, err string) *Error {
+func NewError(code int, err string) *Error {
 	if code <= 0 || code >= errEnd {
 		return nil
 	} else {

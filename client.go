@@ -83,9 +83,9 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 
 			pending.Store(reqMessage.Seq, ctx)
 
-			ctx.deadlineTimer.Store(time.AfterFunc(deadline.Sub(time.Now()), func() {
+			ctx.deadlineTimer.Store(time.AfterFunc(time.Until(deadline), func() {
 				if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
-					ctx.callOnResponse(c.codec, nil, newError(ErrTimeout, "timeout"))
+					ctx.callOnResponse(c.codec, nil, NewError(ErrTimeout, "timeout"))
 				}
 			}))
 
@@ -93,9 +93,9 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 				if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
 					ctx.stopTimer()
 					if e, ok := err.(net.Error); ok && e.Timeout() {
-						go ctx.callOnResponse(c.codec, nil, newError(ErrTimeout, "timeout"))
+						go ctx.callOnResponse(c.codec, nil, NewError(ErrTimeout, "timeout"))
 					} else {
-						go ctx.callOnResponse(c.codec, nil, newError(ErrSend, err.Error()))
+						go ctx.callOnResponse(c.codec, nil, NewError(ErrSend, err.Error()))
 					}
 				}
 				return nil
@@ -137,9 +137,9 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			if err = channel.SendRequestWithContext(ctx, reqMessage); err != nil {
 				pending.Delete(reqMessage.Seq)
 				if e, ok := err.(net.Error); ok && e.Timeout() {
-					return newError(ErrTimeout, "timeout")
+					return NewError(ErrTimeout, "timeout")
 				} else {
-					return newError(ErrSend, err.Error())
+					return NewError(ErrSend, err.Error())
 				}
 			}
 
@@ -150,20 +150,20 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 				pending.Delete(reqMessage.Seq)
 				switch ctx.Err() {
 				case context.Canceled:
-					return newError(ErrCancel, "canceled")
+					return NewError(ErrCancel, "canceled")
 				case context.DeadlineExceeded:
-					return newError(ErrTimeout, "timeout")
+					return NewError(ErrTimeout, "timeout")
 				default:
-					return newError(ErrOther, "unknow")
+					return NewError(ErrOther, "unknow")
 				}
 			}
 		} else {
 			reqMessage.Oneway = true
 			if err = channel.SendRequestWithContext(ctx, reqMessage); nil != err {
 				if e, ok := err.(net.Error); ok && e.Timeout() {
-					return newError(ErrTimeout, "timeout")
+					return NewError(ErrTimeout, "timeout")
 				} else {
-					return newError(ErrSend, err.Error())
+					return NewError(ErrSend, err.Error())
 				}
 			} else {
 				return nil
