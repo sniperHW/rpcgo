@@ -264,7 +264,7 @@ func TestRPC(t *testing.T) {
 	assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
 
 	{
-		cancel := rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err error) {
+		cancel, _ := rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err error) {
 			assert.Equal(t, *resp.(*string), "hello world:hw")
 			panic("should not reach here")
 		})

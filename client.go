@@ -2,6 +2,7 @@ package rpcgo
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -56,10 +57,9 @@ func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
 	}
 }
 
-func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method string, arg interface{}, ret interface{}, respCb RespCB) func() bool {
+func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method string, arg interface{}, ret interface{}, respCb RespCB) (func() bool, error) {
 	if b, err := c.codec.Encode(arg); err != nil {
-		logger.Panicf("encode error:%v", err)
-		return nil
+		return nil, fmt.Errorf("encode error:%v", err)
 	} else {
 		reqMessage := &RequestMsg{
 			Seq:    atomic.AddUint64(&c.nextSequence, 1),
@@ -71,7 +71,7 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 			if err = channel.SendRequest(reqMessage, deadline); err != nil {
 				logger.Errorf("SendRequest error:%v", err)
 			}
-			return nil
+			return nil, nil
 		} else {
 
 			ctx := &callContext{
@@ -98,7 +98,7 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 						go ctx.callOnResponse(c.codec, nil, NewError(ErrSend, err.Error()))
 					}
 				}
-				return nil
+				return nil, nil
 			} else {
 				return func() bool {
 					if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
@@ -107,7 +107,7 @@ func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method st
 					} else {
 						return false
 					}
-				}
+				}, nil
 			}
 		}
 	}
