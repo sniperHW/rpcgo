@@ -3,7 +3,7 @@ module github.com/sniperHW/rpcgo
 go 1.18
 
 require (
-	github.com/sniperHW/netgo v0.0.0-20221014012016-06baf0ad38c6
+	github.com/sniperHW/netgo v0.0.0-20230107025550-0ab3b396e8ee
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/zap v1.23.0
 )
@@ -20,6 +20,7 @@ require (
 	github.com/templexxx/xorsimd v0.4.1 // indirect
 	github.com/tjfoc/gmsm v1.3.2 // indirect
 	github.com/xtaci/kcp-go/v5 v5.6.1 // indirect
+	github.com/xtaci/smux v1.5.16 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/crypto v0.0.0-20221005025214-4161e89ecf1b // indirect
