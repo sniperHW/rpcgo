@@ -3,7 +3,7 @@ module github.com/sniperHW/rpcgo
 go 1.18
 
 require (
-	github.com/sniperHW/netgo v0.0.0-20230107025550-0ab3b396e8ee
+	github.com/sniperHW/netgo v0.0.0-20230421040414-319147735f4e
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/zap v1.23.0
 )
@@ -25,8 +25,8 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/crypto v0.0.0-20221005025214-4161e89ecf1b // indirect
 	golang.org/x/mod v0.3.0 // indirect
-	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2 // indirect
-	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1 // indirect
+	golang.org/x/net v0.7.0 // indirect
+	golang.org/x/sys v0.5.0 // indirect
 	golang.org/x/tools v0.0.0-20200808161706-5bf02b21f123 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
