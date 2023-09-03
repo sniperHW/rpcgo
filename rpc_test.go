@@ -86,13 +86,9 @@ type PacketCodec struct {
 func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 	switch b[0] {
 	case packet_rpc_request:
-		request := &RequestMsg{}
-		json.Unmarshal(b[1:], request)
-		return request, nil
+		return DecodeRequest(b[1:])
 	case packet_rpc_response:
-		response := &ResponseMsg{}
-		json.Unmarshal(b[1:], response)
-		return response, nil
+		return DecodeResponse(b[1:])
 	case packet_msg:
 		return string(b[1:]), nil
 	default:
@@ -108,11 +104,11 @@ func (codec *PacketCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers,
 	case *RequestMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_request)
-		dataBytes, _ = json.Marshal(o)
+		dataBytes, _ = EncodeRequest(o) //json.Marshal(o)
 	case *ResponseMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_response)
-		dataBytes, _ = json.Marshal(o)
+		dataBytes, _ = EncodeResponse(o) //json.Marshal(o)
 	case string:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_msg)
@@ -331,5 +327,94 @@ func TestRPC(t *testing.T) {
 	as.Close(nil)
 
 	listener.Close()
+
+}
+
+func TestEnDeCode(t *testing.T) {
+	{
+		req := &RequestMsg{
+			Seq:    10012,
+			Method: "test",
+			Arg:    []byte("hello"),
+			Oneway: true,
+		}
+
+		b, _ := EncodeRequest(req)
+
+		req = nil
+
+		req, _ = DecodeRequest(b)
+
+		assert.Equal(t, req.Seq, uint64(10012))
+
+		assert.Equal(t, req.Method, "test")
+
+		assert.Equal(t, req.Oneway, true)
+
+		assert.Equal(t, req.Arg, []byte("hello"))
+	}
+
+	{
+		req := &RequestMsg{
+			Seq:    10012,
+			Method: "test",
+			Arg:    []byte("hello"),
+		}
+
+		b, _ := EncodeRequest(req)
+
+		req = nil
+
+		req, _ = DecodeRequest(b)
+
+		assert.Equal(t, req.Seq, uint64(10012))
+
+		assert.Equal(t, req.Method, "test")
+
+		assert.Equal(t, req.Oneway, false)
+
+		assert.Equal(t, req.Arg, []byte("hello"))
+	}
+
+	{
+
+		resp := &ResponseMsg{
+			Seq: 10012,
+			Ret: []byte("hello"),
+		}
+
+		b, _ := EncodeResponse(resp)
+
+		resp = nil
+
+		resp, _ = DecodeResponse(b)
+
+		assert.Equal(t, resp.Seq, uint64(10012))
+
+		assert.Nil(t, resp.Err)
+
+		assert.Equal(t, resp.Ret, []byte("hello"))
+	}
+
+	{
+
+		resp := &ResponseMsg{
+			Seq: 10012,
+			Ret: []byte("hello"),
+			Err: NewError(ErrOther, "error"),
+		}
+
+		b, _ := EncodeResponse(resp)
+
+		resp = nil
+
+		resp, _ = DecodeResponse(b)
+
+		assert.Equal(t, resp.Seq, uint64(10012))
+
+		assert.Equal(t, resp.Err.Error(), "error")
+
+		assert.Equal(t, resp.Ret, []byte("hello"))
+	}
 
 }
