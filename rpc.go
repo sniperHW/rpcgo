@@ -70,7 +70,7 @@ const (
 	lenOneWay    = 1
 	lenMethod    = 2
 	maxMethodLen = 65535
-	reqHdrLen    = lenSeq + lenOneWay + lenOneWay // seq + oneway + len(method)
+	reqHdrLen    = lenSeq + lenOneWay + lenMethod // seq + oneway + len(method)
 	maxErrStrLen = 65535
 	lenErrCode   = 2
 	respHdrLen   = lenSeq + lenErrCode //seq + Error.Err.Code
