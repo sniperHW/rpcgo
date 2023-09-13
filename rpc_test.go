@@ -180,14 +180,14 @@ func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
 	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
-		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
 	rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
 			logger.Debugf("timeout reply")
-			replyer.Reply(fmt.Sprintf("timeout hello world:%s", *arg), nil)
+			replyer.Reply(fmt.Sprintf("timeout hello world:%s", *arg))
 		}()
 	})
 
@@ -276,7 +276,7 @@ func TestRPC(t *testing.T) {
 
 	rpcServer.Register("syncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
 		logger.Debugf("syncOneway %s", *arg)
-		replyer.Reply(*arg, nil)
+		replyer.Reply(*arg)
 		close(c)
 	})
 
@@ -288,7 +288,7 @@ func TestRPC(t *testing.T) {
 
 	rpcServer.Register("ayncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
 		logger.Debugf("ayncOneway %s", *arg)
-		replyer.Reply(*arg, nil)
+		replyer.Reply(*arg)
 		close(c)
 	})
 
@@ -313,7 +313,7 @@ func TestRPC(t *testing.T) {
 	rpcServer.Register("panic", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer = nil
 		//cause panic
-		replyer.Reply(*arg, nil)
+		replyer.Reply(*arg)
 	})
 
 	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)

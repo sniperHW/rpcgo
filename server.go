@@ -18,23 +18,34 @@ type Replyer struct {
 	oneway  bool
 }
 
-func (r *Replyer) Reply(ret interface{}, err error) {
+func (r *Replyer) Error(err error) {
 	if !r.oneway && atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
 		resp := &ResponseMsg{
 			Seq: r.seq,
 		}
-		if nil == err {
-			if b, e := r.codec.Encode(ret); e != nil {
-				logger.Panicf("send rpc response to (%s) encode ret error:%s\n", r.channel.Name(), e.Error())
-			} else {
-				resp.Ret = b
-			}
+
+		if _, ok := err.(*Error); ok {
+			resp.Err = err.(*Error)
 		} else {
-			if _, ok := err.(*Error); ok {
-				resp.Err = err.(*Error)
-			} else {
-				resp.Err = NewError(ErrMethod, err.Error())
-			}
+			resp.Err = NewError(ErrMethod, err.Error())
+		}
+
+		if e := r.channel.Reply(resp); e != nil {
+			logger.Errorf("send rpc response to (%s) error:%s\n", r.channel.Name(), e.Error())
+		}
+	}
+}
+
+func (r *Replyer) Reply(ret interface{}) {
+	if !r.oneway && atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
+		resp := &ResponseMsg{
+			Seq: r.seq,
+		}
+
+		if b, e := r.codec.Encode(ret); e != nil {
+			logger.Panicf("send rpc response to (%s) encode ret error:%s\n", r.channel.Name(), e.Error())
+		} else {
+			resp.Ret = b
 		}
 
 		if e := r.channel.Reply(resp); e != nil {
@@ -97,13 +108,13 @@ func (c *methodCaller) call(context context.Context, codec Codec, replyer *Reply
 				buf := make([]byte, 65535)
 				l := runtime.Stack(buf, false)
 				logger.Errorf("method:%s channel:%s %s", c.name, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
-				replyer.Reply(nil, NewError(ErrOther, "method panic"))
+				replyer.Error(NewError(ErrOther, "method panic"))
 			}
 		}()
 		reflect.ValueOf(c.fn).Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 	} else {
 		logger.Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
-		replyer.Reply(nil, NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
+		replyer.Error(NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
 	}
 }
 
@@ -160,9 +171,9 @@ func (s *Server) method(name string) *methodCaller {
 func (s *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
 	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway}
 	if caller := s.method(req.Method); caller == nil {
-		replyer.Reply(nil, NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
+		replyer.Error(NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
 	} else if atomic.LoadInt32(&s.pause) == 1 {
-		replyer.Reply(nil, NewError(ErrServerPause, "server pause"))
+		replyer.Error(NewError(ErrServerPause, "server pause"))
 	} else {
 		caller.call(context, s.codec, replyer, req)
 	}

@@ -3,17 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/sniperHW/netgo"
-	"github.com/sniperHW/rpcgo"
 	"log"
 	"net"
+
+	"github.com/sniperHW/netgo"
+	"github.com/sniperHW/rpcgo"
 )
 
 func startService(service string) {
 	rpcServer := rpcgo.NewServer(&JsonCodec{})
 
 	rpcServer.Register("hello", func(context context.Context, replyer *rpcgo.Replyer, arg *string) {
-		replyer.Reply(fmt.Sprintf("hello world:%s", *arg), nil)
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
 	_, serve, _ := netgo.ListenTCP("tcp", service, func(conn *net.TCPConn) {
