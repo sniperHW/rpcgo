@@ -77,38 +77,28 @@ const (
 	lenErrStr    = 2
 )
 
-func EncodeRequest(req *RequestMsg) ([]byte, error) {
-	if len(req.Method) > maxMethodLen {
-		return nil, errors.New("method to large")
+func EncodeRequest(req *RequestMsg) []byte {
+	method := []byte(req.Method)
+
+	if len(method) > maxMethodLen {
+		method = method[:maxMethodLen]
 	}
 
-	buff := make([]byte, 0, reqHdrLen+len(req.Method)+len(req.Arg))
+	buff := make([]byte, 11, reqHdrLen+len(method)+len(req.Arg))
 
-	seq := []byte{0, 0, 0, 0, 0, 0, 0, 0}
-
-	binary.BigEndian.PutUint64(seq, req.Seq)
-
-	buff = append(buff, seq...)
+	binary.BigEndian.PutUint64(buff, req.Seq)
 
 	if req.Oneway {
-		buff = append(buff, byte(1))
-	} else {
-		buff = append(buff, byte(0))
+		buff[8] = byte(1)
 	}
 
-	methodLen := []byte{0, 0}
+	binary.BigEndian.PutUint16(buff[9:], uint16(len(req.Method)))
 
-	binary.BigEndian.PutUint16(methodLen, uint16(len(req.Method)))
-
-	buff = append(buff, methodLen...)
-
-	for _, v := range req.Method {
-		buff = append(buff, byte(v))
-	}
+	buff = append(buff, method...)
 
 	buff = append(buff, req.Arg...)
 
-	return buff, nil
+	return buff
 }
 
 func DecodeRequest(buff []byte) (*RequestMsg, error) {
@@ -146,43 +136,34 @@ func DecodeRequest(buff []byte) (*RequestMsg, error) {
 	return &req, nil
 }
 
-func EncodeResponse(resp *ResponseMsg) ([]byte, error) {
+func EncodeResponse(resp *ResponseMsg) []byte {
 
 	var buff []byte
 	var errByte []byte
 
 	if resp.Err == nil {
-		buff = make([]byte, 0, respHdrLen+len(resp.Ret))
+		buff = make([]byte, 10, respHdrLen+len(resp.Ret))
 	} else {
 		errByte = []byte(resp.Err.str)
 		if len(errByte) > maxErrStrLen {
 			errByte = errByte[:maxErrStrLen]
 		}
-		buff = make([]byte, 0, respHdrLen+lenErrStr+len(errByte)+len(resp.Ret))
+		buff = make([]byte, 10, respHdrLen+lenErrStr+len(errByte)+len(resp.Ret))
 	}
 
-	seq := []byte{0, 0, 0, 0, 0, 0, 0, 0}
-
-	binary.BigEndian.PutUint64(seq, resp.Seq)
-
-	buff = append(buff, seq...)
-
-	errCode := []byte{0, 0}
+	binary.BigEndian.PutUint64(buff, resp.Seq)
 
 	if resp.Err != nil {
-		binary.BigEndian.PutUint16(errCode, uint16(resp.Err.code))
-		buff = append(buff, errCode...)
+		binary.BigEndian.PutUint16(buff[8:], uint16(resp.Err.code))
 		errStrLen := []byte{0, 0}
 		binary.BigEndian.PutUint16(errStrLen, uint16(len(errByte)))
 		buff = append(buff, errStrLen...)
 		buff = append(buff, errByte...)
-	} else {
-		buff = append(buff, errCode...)
 	}
 
 	buff = append(buff, resp.Ret...)
 
-	return buff, nil
+	return buff
 }
 
 func DecodeResponse(buff []byte) (*ResponseMsg, error) {
