@@ -104,11 +104,11 @@ func (codec *PacketCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers,
 	case *RequestMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_request)
-		dataBytes, _ = EncodeRequest(o) //json.Marshal(o)
+		dataBytes = EncodeRequest(o) //json.Marshal(o)
 	case *ResponseMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_response)
-		dataBytes, _ = EncodeResponse(o) //json.Marshal(o)
+		dataBytes = EncodeResponse(o) //json.Marshal(o)
 	case string:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_msg)
@@ -311,9 +311,8 @@ func TestRPC(t *testing.T) {
 	assert.Equal(t, err.(*Error).Is(ErrInvaildMethod), true)
 
 	rpcServer.Register("panic", func(_ context.Context, replyer *Replyer, arg *string) {
-		replyer = nil
 		//cause panic
-		replyer.Reply(*arg)
+		panic("panic")
 	})
 
 	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)
@@ -339,7 +338,7 @@ func TestEnDeCode(t *testing.T) {
 			Oneway: true,
 		}
 
-		b, _ := EncodeRequest(req)
+		b := EncodeRequest(req)
 
 		req = nil
 
@@ -361,7 +360,7 @@ func TestEnDeCode(t *testing.T) {
 			Arg:    []byte("hello"),
 		}
 
-		b, _ := EncodeRequest(req)
+		b := EncodeRequest(req)
 
 		req = nil
 
@@ -383,7 +382,7 @@ func TestEnDeCode(t *testing.T) {
 			Ret: []byte("hello"),
 		}
 
-		b, _ := EncodeResponse(resp)
+		b := EncodeResponse(resp)
 
 		resp = nil
 
@@ -404,7 +403,7 @@ func TestEnDeCode(t *testing.T) {
 			Err: NewError(ErrOther, "error"),
 		}
 
-		b, _ := EncodeResponse(resp)
+		b := EncodeResponse(resp)
 
 		resp = nil
 
