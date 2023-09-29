@@ -114,11 +114,11 @@ func (codec *PacketCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers,
 	case *rpcgo.RequestMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_request)
-		dataBytes, _ = rpcgo.EncodeRequest(o)
+		dataBytes = rpcgo.EncodeRequest(o)
 	case *rpcgo.ResponseMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_response)
-		dataBytes, _ = rpcgo.EncodeResponse(o)
+		dataBytes = rpcgo.EncodeResponse(o)
 	default:
 		return buffs, 0
 	}
