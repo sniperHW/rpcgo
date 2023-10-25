@@ -247,33 +247,6 @@ func TestRPC(t *testing.T) {
 
 	c := make(chan struct{})
 
-	rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "hello", "hw", &resp, func(resp interface{}, err error) {
-		assert.Equal(t, *resp.(*string), "hello world:hw")
-		close(c)
-	})
-
-	<-c
-
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
-	defer cancel()
-	err = rpcClient.Call(ctx, rpcChannel, "timeout", "sniperHW", &resp)
-	assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
-
-	{
-		cancel, _ := rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err error) {
-			assert.Equal(t, *resp.(*string), "hello world:hw")
-			panic("should not reach here")
-		})
-
-		time.Sleep(time.Millisecond * 100)
-
-		assert.Equal(t, true, cancel())
-
-		time.Sleep(time.Second * 5)
-	}
-
-	c = make(chan struct{})
-
 	rpcServer.Register("syncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
 		logger.Debugf("syncOneway %s", *arg)
 		replyer.Reply(*arg)
@@ -282,27 +255,6 @@ func TestRPC(t *testing.T) {
 
 	err = rpcClient.Call(context.TODO(), rpcChannel, "syncOneway", "sniperHW", nil)
 	assert.Nil(t, err)
-	<-c
-
-	c = make(chan struct{})
-
-	rpcServer.Register("ayncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
-		logger.Debugf("ayncOneway %s", *arg)
-		replyer.Reply(*arg)
-		close(c)
-	})
-
-	rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "ayncOneway", "hw", nil, nil)
-
-	<-c
-
-	c = make(chan struct{})
-
-	rpcClient.CallWithCallback(rpcChannel, time.Now().Add(time.Second), "timeout", "hw", &resp, func(resp interface{}, err error) {
-		assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
-		close(c)
-	})
-
 	<-c
 
 	rpcServer.UnRegister("hello")

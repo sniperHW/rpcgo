@@ -2,20 +2,17 @@ package rpcgo
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 type RespCB func(interface{}, error)
 
 type callContext struct {
-	onResponse    RespCB
-	deadlineTimer atomic.Value
-	fired         int32
-	respReceiver  interface{}
+	onResponse   RespCB
+	fired        int32
+	respReceiver interface{}
 }
 
 func (c *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
@@ -26,13 +23,11 @@ func (c *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
 			}
 		}
 
-		c.onResponse(c.respReceiver, err)
-	}
-}
-
-func (c *callContext) stopTimer() {
-	if t, ok := c.deadlineTimer.Load().(*time.Timer); ok {
-		t.Stop()
+		if err == nil {
+			c.onResponse(c.respReceiver, nil)
+		} else {
+			c.onResponse(c.respReceiver, err)
+		}
 	}
 }
 
@@ -50,66 +45,9 @@ func NewClient(codec Codec) *Client {
 
 func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
 	if ctx, ok := c.pendingCall[int(resp.Seq)%len(c.pendingCall)].LoadAndDelete(resp.Seq); ok {
-		ctx.(*callContext).stopTimer()
 		ctx.(*callContext).callOnResponse(c.codec, resp.Ret, resp.Err)
 	} else {
 		logger.Infof("onResponse with no reqContext:%d", resp.Seq)
-	}
-}
-
-func (c *Client) CallWithCallback(channel Channel, deadline time.Time, method string, arg interface{}, ret interface{}, respCb RespCB) (func() bool, error) {
-	if b, err := c.codec.Encode(arg); err != nil {
-		return nil, fmt.Errorf("encode error:%v", err)
-	} else {
-		reqMessage := &RequestMsg{
-			Seq:    atomic.AddUint64(&c.nextSequence, 1),
-			Method: method,
-			Arg:    b,
-		}
-		if respCb == nil || ret == nil {
-			reqMessage.Oneway = true
-			if err = channel.SendRequest(reqMessage, deadline); err != nil {
-				logger.Errorf("SendRequest error:%v", err)
-			}
-			return nil, nil
-		} else {
-
-			ctx := &callContext{
-				onResponse:   respCb,
-				respReceiver: ret,
-			}
-
-			pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
-
-			pending.Store(reqMessage.Seq, ctx)
-
-			ctx.deadlineTimer.Store(time.AfterFunc(time.Until(deadline), func() {
-				if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
-					ctx.callOnResponse(c.codec, nil, NewError(ErrTimeout, "timeout"))
-				}
-			}))
-
-			if err = channel.SendRequest(reqMessage, deadline); err != nil {
-				if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
-					ctx.stopTimer()
-					if e, ok := err.(net.Error); ok && e.Timeout() {
-						go ctx.callOnResponse(c.codec, nil, NewError(ErrTimeout, "timeout"))
-					} else {
-						go ctx.callOnResponse(c.codec, nil, NewError(ErrSend, err.Error()))
-					}
-				}
-				return nil, nil
-			} else {
-				return func() bool {
-					if _, ok := pending.LoadAndDelete(reqMessage.Seq); ok {
-						ctx.stopTimer()
-						return true
-					} else {
-						return false
-					}
-				}, nil
-			}
-		}
 	}
 }
 
