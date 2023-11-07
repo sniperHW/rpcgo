@@ -61,7 +61,7 @@ func (r *Replyer) Channel() Channel {
 type methodCaller struct {
 	name    string
 	argType reflect.Type
-	fn      interface{}
+	fn      reflect.Value
 }
 
 // 接受的method func(context.Context, *Replyer,*Pointer)
@@ -93,7 +93,7 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 
 	caller := &methodCaller{
 		argType: fnType.In(2).Elem(),
-		fn:      method,
+		fn:      reflect.ValueOf(method),
 		name:    name,
 	}
 
@@ -111,7 +111,7 @@ func (c *methodCaller) call(context context.Context, codec Codec, replyer *Reply
 				replyer.Error(NewError(ErrOther, "method panic"))
 			}
 		}()
-		reflect.ValueOf(c.fn).Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
+		c.fn.Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 	} else {
 		logger.Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
 		replyer.Error(NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
