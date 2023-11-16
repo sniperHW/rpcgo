@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type RespCB func(interface{}, error)
@@ -32,15 +33,39 @@ func (c *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
 }
 
 type Client struct {
-	nextSequence uint64
+	sync.Mutex
+	nextSequence uint32
+	timestamp    uint32
+	timeOffset   uint32
+	startTime    time.Time
 	codec        Codec
 	pendingCall  [32]sync.Map
 }
 
 func NewClient(codec Codec) *Client {
 	return &Client{
-		codec: codec,
+		codec:      codec,
+		timeOffset: uint32(time.Now().Unix() - time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local).Unix()),
+		startTime:  time.Now(),
 	}
+}
+
+func (c *Client) getTimeStamp() uint32 {
+	return uint32(time.Since(c.startTime)/time.Second) + c.timeOffset
+}
+
+func (c *Client) makeSequence() (seq uint64) {
+	timestamp := c.getTimeStamp()
+	c.Lock()
+	if timestamp > c.timestamp {
+		c.timestamp = timestamp
+		c.nextSequence = 1
+	} else {
+		c.nextSequence++
+	}
+	seq = uint64(c.nextSequence)
+	c.Unlock()
+	return seq
 }
 
 func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
@@ -57,7 +82,7 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 		return nil
 	} else {
 		reqMessage := &RequestMsg{
-			Seq:    atomic.AddUint64(&c.nextSequence, 1),
+			Seq:    c.makeSequence(),
 			Method: method,
 			Arg:    b,
 		}
