@@ -2,6 +2,7 @@ package rpcgo
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -20,14 +21,13 @@ func (c *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
 	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
 		if err == nil {
 			if e := codec.Decode(resp, c.respReceiver); e != nil {
-				logger.Panicf("callOnResponse decode error:%v", e)
+				logger.Errorf("callOnResponse decode error:%v", e)
+				c.onResponse(nil, errors.New("callOnResponse decode error"))
+			} else {
+				c.onResponse(c.respReceiver, nil)
 			}
-		}
-
-		if err == nil {
-			c.onResponse(c.respReceiver, nil)
 		} else {
-			c.onResponse(c.respReceiver, err)
+			c.onResponse(nil, err)
 		}
 	}
 }
