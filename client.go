@@ -12,7 +12,7 @@ import (
 type RespCB func(interface{}, error)
 
 type callContext struct {
-	onResponse   RespCB
+	respC        chan error
 	fired        int32
 	respReceiver interface{}
 }
@@ -22,12 +22,12 @@ func (c *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
 		if err == nil {
 			if e := codec.Decode(resp, c.respReceiver); e != nil {
 				logger.Errorf("callOnResponse decode error:%v", e)
-				c.onResponse(nil, errors.New("callOnResponse decode error"))
+				c.respC <- errors.New("callOnResponse decode error")
 			} else {
-				c.onResponse(c.respReceiver, nil)
+				c.respC <- nil
 			}
 		} else {
-			c.onResponse(nil, err)
+			c.respC <- err
 		}
 	}
 }
@@ -87,15 +87,15 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			Arg:    b,
 		}
 		if ret != nil {
-			waitC := make(chan error, 1)
+
 			pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
 
-			pending.Store(reqMessage.Seq, &callContext{
+			callCtx := &callContext{
 				respReceiver: ret,
-				onResponse: func(_ interface{}, err error) {
-					waitC <- err
-				},
-			})
+				respC:        make(chan error),
+			}
+
+			pending.Store(reqMessage.Seq, callCtx)
 
 			if err = channel.SendRequestWithContext(ctx, reqMessage); err != nil {
 				pending.Delete(reqMessage.Seq)
@@ -107,7 +107,7 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			}
 
 			select {
-			case err := <-waitC:
+			case err := <-callCtx.respC:
 				return err
 			case <-ctx.Done():
 				pending.Delete(reqMessage.Seq)
