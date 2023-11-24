@@ -57,11 +57,7 @@ type testChannel struct {
 	socket *netgo.AsynSocket
 }
 
-func (c *testChannel) SendRequest(request *RequestMsg, deadline time.Time) error {
-	return c.socket.Send(request, deadline)
-}
-
-func (c *testChannel) SendRequestWithContext(ctx context.Context, request *RequestMsg) error {
+func (c *testChannel) SendRequest(ctx context.Context, request *RequestMsg) error {
 	return c.socket.SendWithContext(ctx, request)
 }
 
@@ -75,6 +71,10 @@ func (c *testChannel) Name() string {
 
 func (c *testChannel) Identity() uint64 {
 	return *(*uint64)(unsafe.Pointer(c.socket))
+}
+
+func (c *testChannel) IsRetryAbleError(_ error) bool {
+	return false
 }
 
 type PacketCodec struct {

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 	"unsafe"
 
 	"github.com/sniperHW/netgo"
@@ -14,11 +13,7 @@ type rcpChannel struct {
 	socket *netgo.AsynSocket
 }
 
-func (c *rcpChannel) SendRequest(request *rpcgo.RequestMsg, deadline time.Time) error {
-	return c.socket.Send(request, deadline)
-}
-
-func (c *rcpChannel) SendRequestWithContext(ctx context.Context, request *rpcgo.RequestMsg) error {
+func (c *rcpChannel) SendRequest(ctx context.Context, request *rpcgo.RequestMsg) error {
 	return c.socket.SendWithContext(ctx, request)
 }
 
@@ -32,4 +27,8 @@ func (c *rcpChannel) Name() string {
 
 func (c *rcpChannel) Identity() uint64 {
 	return *(*uint64)(unsafe.Pointer(c.socket))
+}
+
+func (c *rcpChannel) IsRetryAbleError(_ error) bool {
+	return false
 }

@@ -76,6 +76,14 @@ func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
 	}
 }
 
+func isNetTimeoutError(err error) bool {
+	if e, ok := err.(net.Error); ok && e.Timeout() {
+		return true
+	} else {
+		return false
+	}
+}
+
 func (c *Client) Call(ctx context.Context, channel Channel, method string, arg interface{}, ret interface{}) error {
 	if b, err := c.codec.Encode(arg); err != nil {
 		logger.Panicf("encode error:%v", err)
@@ -86,50 +94,84 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			Method: method,
 			Arg:    b,
 		}
-		if ret != nil {
 
+		if ret == nil {
+			reqMessage.Oneway = true
+			for {
+				if err = channel.SendRequest(ctx, reqMessage); err != nil {
+					retryAble := channel.IsRetryAbleError(err)
+					if isNetTimeoutError(err) || retryAble {
+						if retryAble {
+							time.Sleep(time.Millisecond * 10)
+						}
+						select {
+						case <-ctx.Done():
+							switch ctx.Err() {
+							case context.Canceled:
+								return NewError(ErrCancel, "canceled")
+							case context.DeadlineExceeded:
+								return NewError(ErrTimeout, "timeout")
+							default:
+								return NewError(ErrOther, "unknow")
+							}
+						default:
+							//context没有超时或被取消，继续尝试发送
+						}
+					} else {
+						return err
+					}
+				} else {
+					return nil
+				}
+			}
+		} else {
 			pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
-
 			callCtx := &callContext{
 				respReceiver: ret,
 				respC:        make(chan error),
 			}
-
 			pending.Store(reqMessage.Seq, callCtx)
-
-			if err = channel.SendRequestWithContext(ctx, reqMessage); err != nil {
-				pending.Delete(reqMessage.Seq)
-				if e, ok := err.(net.Error); ok && e.Timeout() {
-					return NewError(ErrTimeout, "timeout")
+			for {
+				if err = channel.SendRequest(ctx, reqMessage); err != nil {
+					retryAble := channel.IsRetryAbleError(err)
+					if isNetTimeoutError(err) || retryAble {
+						if retryAble {
+							time.Sleep(time.Millisecond * 10)
+						}
+						select {
+						case <-ctx.Done():
+							pending.Delete(reqMessage.Seq)
+							switch ctx.Err() {
+							case context.Canceled:
+								return NewError(ErrCancel, "canceled")
+							case context.DeadlineExceeded:
+								return NewError(ErrTimeout, "timeout")
+							default:
+								return NewError(ErrOther, "unknow")
+							}
+						default:
+							//context没有超时或被取消，继续尝试发送
+						}
+					} else {
+						pending.Delete(reqMessage.Seq)
+						return err
+					}
 				} else {
-					return NewError(ErrSend, err.Error())
+					select {
+					case err := <-callCtx.respC:
+						return err
+					case <-ctx.Done():
+						pending.Delete(reqMessage.Seq)
+						switch ctx.Err() {
+						case context.Canceled:
+							return NewError(ErrCancel, "canceled")
+						case context.DeadlineExceeded:
+							return NewError(ErrTimeout, "timeout")
+						default:
+							return NewError(ErrOther, "unknow")
+						}
+					}
 				}
-			}
-
-			select {
-			case err := <-callCtx.respC:
-				return err
-			case <-ctx.Done():
-				pending.Delete(reqMessage.Seq)
-				switch ctx.Err() {
-				case context.Canceled:
-					return NewError(ErrCancel, "canceled")
-				case context.DeadlineExceeded:
-					return NewError(ErrTimeout, "timeout")
-				default:
-					return NewError(ErrOther, "unknow")
-				}
-			}
-		} else {
-			reqMessage.Oneway = true
-			if err = channel.SendRequestWithContext(ctx, reqMessage); nil != err {
-				if e, ok := err.(net.Error); ok && e.Timeout() {
-					return NewError(ErrTimeout, "timeout")
-				} else {
-					return NewError(ErrSend, err.Error())
-				}
-			} else {
-				return nil
 			}
 		}
 	}

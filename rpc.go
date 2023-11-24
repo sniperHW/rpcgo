@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"time"
 )
 
 var logger Logger
@@ -45,7 +44,6 @@ const (
 	ErrInvaildMethod
 	ErrServerPause
 	ErrTimeout
-	ErrSend
 	ErrCancel
 	ErrMethod
 	ErrOther
@@ -213,9 +211,9 @@ type Codec interface {
 }
 
 type Channel interface {
-	SendRequest(*RequestMsg, time.Time) error
-	SendRequestWithContext(context.Context, *RequestMsg) error
+	SendRequest(context.Context, *RequestMsg) error
 	Reply(*ResponseMsg) error
 	Name() string
 	Identity() uint64
+	IsRetryAbleError(error) bool
 }
