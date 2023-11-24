@@ -144,10 +144,8 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 							switch ctx.Err() {
 							case context.Canceled:
 								return NewError(ErrCancel, "canceled")
-							case context.DeadlineExceeded:
-								return NewError(ErrTimeout, "timeout")
 							default:
-								return NewError(ErrOther, "unknow")
+								return NewError(ErrTimeout, "timeout")
 							}
 						default:
 							//context没有超时或被取消，继续尝试发送
@@ -165,10 +163,8 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						switch ctx.Err() {
 						case context.Canceled:
 							return NewError(ErrCancel, "canceled")
-						case context.DeadlineExceeded:
-							return NewError(ErrTimeout, "timeout")
 						default:
-							return NewError(ErrOther, "unknow")
+							return NewError(ErrTimeout, "timeout")
 						}
 					}
 				}
