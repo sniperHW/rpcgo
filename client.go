@@ -3,7 +3,6 @@ package rpcgo
 import (
 	"context"
 	"errors"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,14 +75,6 @@ func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
 	}
 }
 
-func isNetTimeoutError(err error) bool {
-	if e, ok := err.(net.Error); ok && e.Timeout() {
-		return true
-	} else {
-		return false
-	}
-}
-
 func (c *Client) Call(ctx context.Context, channel Channel, method string, arg interface{}, ret interface{}) error {
 	if b, err := c.codec.Encode(arg); err != nil {
 		logger.Panicf("encode error:%v", err)
@@ -99,11 +90,8 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			reqMessage.Oneway = true
 			for {
 				if err = channel.SendRequest(ctx, reqMessage); err != nil {
-					retryAble := channel.IsRetryAbleError(err)
-					if isNetTimeoutError(err) || retryAble {
-						if retryAble {
-							time.Sleep(time.Millisecond * 10)
-						}
+					if channel.IsRetryAbleError(err) {
+						time.Sleep(time.Millisecond * 10)
 						select {
 						case <-ctx.Done():
 							switch ctx.Err() {
@@ -133,11 +121,8 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			pending.Store(reqMessage.Seq, callCtx)
 			for {
 				if err = channel.SendRequest(ctx, reqMessage); err != nil {
-					retryAble := channel.IsRetryAbleError(err)
-					if isNetTimeoutError(err) || retryAble {
-						if retryAble {
-							time.Sleep(time.Millisecond * 10)
-						}
+					if channel.IsRetryAbleError(err) {
+						time.Sleep(time.Millisecond * 10)
 						select {
 						case <-ctx.Done():
 							pending.Delete(reqMessage.Seq)
