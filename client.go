@@ -81,7 +81,6 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 		return nil
 	} else {
 		reqMessage := &RequestMsg{
-			Seq:    c.makeSequence(),
 			Method: method,
 			Arg:    b,
 		}
@@ -89,6 +88,7 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 		if ret == nil {
 			reqMessage.Oneway = true
 			for {
+				reqMessage.Seq = c.makeSequence()
 				if err = channel.SendRequest(ctx, reqMessage); err != nil {
 					if channel.IsRetryAbleError(err) {
 						time.Sleep(time.Millisecond * 10)
@@ -113,13 +113,14 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 				}
 			}
 		} else {
-			pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
-			callCtx := &callContext{
-				respReceiver: ret,
-				respC:        make(chan error),
-			}
-			pending.Store(reqMessage.Seq, callCtx)
 			for {
+				reqMessage.Seq = c.makeSequence()
+				pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
+				callCtx := &callContext{
+					respReceiver: ret,
+					respC:        make(chan error),
+				}
+				pending.Store(reqMessage.Seq, callCtx)
 				if err = channel.SendRequest(ctx, reqMessage); err != nil {
 					if channel.IsRetryAbleError(err) {
 						time.Sleep(time.Millisecond * 10)
