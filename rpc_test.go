@@ -231,7 +231,7 @@ func TestRPC(t *testing.T) {
 		case string:
 			close(msgChan)
 		case *ResponseMsg:
-			rpcClient.OnMessage(context, packet)
+			rpcClient.OnMessage(packet)
 		}
 		return nil
 	}).Recv()

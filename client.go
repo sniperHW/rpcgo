@@ -67,7 +67,7 @@ func (c *Client) makeSequence() (seq uint64) {
 	return seq
 }
 
-func (c *Client) OnMessage(context context.Context, resp *ResponseMsg) {
+func (c *Client) OnMessage(resp *ResponseMsg) {
 	if ctx, ok := c.pendingCall[int(resp.Seq)%len(c.pendingCall)].LoadAndDelete(resp.Seq); ok {
 		ctx.(*callContext).callOnResponse(c.codec, resp.Ret, resp.Err)
 	} else {
