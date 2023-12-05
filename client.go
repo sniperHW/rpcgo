@@ -94,13 +94,14 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						time.Sleep(time.Millisecond * 10)
 						select {
 						case <-ctx.Done():
-							switch ctx.Err() {
+							err = ctx.Err()
+							switch err {
 							case context.Canceled:
 								return NewError(ErrCancel, "canceled")
 							case context.DeadlineExceeded:
 								return NewError(ErrTimeout, "timeout")
 							default:
-								return NewError(ErrOther, "unknow")
+								return err
 							}
 						default:
 							//context没有超时或被取消，继续尝试发送
@@ -126,11 +127,14 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						select {
 						case <-ctx.Done():
 							pending.Delete(reqMessage.Seq)
-							switch ctx.Err() {
+							err = ctx.Err()
+							switch err {
 							case context.Canceled:
 								return NewError(ErrCancel, "canceled")
-							default:
+							case context.DeadlineExceeded:
 								return NewError(ErrTimeout, "timeout")
+							default:
+								return err
 							}
 						default:
 							//context没有超时或被取消，继续尝试发送
@@ -145,11 +149,14 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						return err
 					case <-ctx.Done():
 						pending.Delete(reqMessage.Seq)
-						switch ctx.Err() {
+						err = ctx.Err()
+						switch err {
 						case context.Canceled:
 							return NewError(ErrCancel, "canceled")
-						default:
+						case context.DeadlineExceeded:
 							return NewError(ErrTimeout, "timeout")
+						default:
+							return err
 						}
 					}
 				}
