@@ -121,7 +121,6 @@ func (c *methodCaller) call(context context.Context, codec Codec, replyer *Reply
 type Server struct {
 	sync.RWMutex
 	methods map[string]*methodCaller
-	pause   int32
 	codec   Codec
 }
 
@@ -129,14 +128,6 @@ func NewServer(codec Codec) *Server {
 	return &Server{
 		methods: map[string]*methodCaller{},
 		codec:   codec}
-}
-
-func (s *Server) Pause() {
-	atomic.StoreInt32(&s.pause, 1)
-}
-
-func (s *Server) Resume() {
-	atomic.StoreInt32(&s.pause, 0)
 }
 
 func (s *Server) Register(name string, method interface{}) error {
@@ -172,8 +163,6 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway}
 	if caller := s.method(req.Method); caller == nil {
 		replyer.Error(NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
-	} else if atomic.LoadInt32(&s.pause) == 1 {
-		replyer.Error(NewError(ErrServerPause, "server pause"))
 	} else {
 		caller.call(context, s.codec, replyer, req)
 	}

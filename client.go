@@ -81,13 +81,13 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						case context.DeadlineExceeded:
 							return NewError(ErrTimeout, "timeout")
 						default:
-							return err
+							return NewError(ErrOther, err.Error())
 						}
 					default:
 						//context没有超时或被取消，继续尝试发送
 					}
 				} else {
-					return err
+					return NewError(ErrOther, err.Error())
 				}
 			}
 		} else {
@@ -102,7 +102,11 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						if resp.Err != nil {
 							return resp.Err
 						}
-						return c.codec.Decode(resp.Ret, ret)
+						if err = c.codec.Decode(resp.Ret, ret); err == nil {
+							return nil
+						} else {
+							return NewError(ErrOther, err.Error())
+						}
 					case <-ctx.Done():
 						_, ok := pending.LoadAndDelete(reqMessage.Seq)
 						if ok {
@@ -115,7 +119,7 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						case context.DeadlineExceeded:
 							return NewError(ErrTimeout, "timeout")
 						default:
-							return err
+							return NewError(ErrOther, err.Error())
 						}
 					}
 				} else if channel.IsRetryAbleError(err) {
@@ -130,14 +134,14 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 						case context.DeadlineExceeded:
 							return NewError(ErrTimeout, "timeout")
 						default:
-							return err
+							return NewError(ErrOther, err.Error())
 						}
 					default:
 						//context没有超时或被取消，继续尝试发送
 					}
 				} else {
 					pending.Delete(reqMessage.Seq)
-					return err
+					return NewError(ErrOther, err.Error())
 				}
 			}
 		}

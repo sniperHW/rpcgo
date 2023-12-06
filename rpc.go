@@ -42,7 +42,6 @@ func (e *Error) Is(code int) bool {
 const (
 	ErrOk = iota
 	ErrInvaildMethod
-	ErrServerPause
 	ErrTimeout
 	ErrCancel
 	ErrMethod

@@ -270,11 +270,6 @@ func TestRPC(t *testing.T) {
 	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)
 	assert.Equal(t, err.Error(), "method panic")
 
-	rpcServer.Pause()
-
-	err = rpcClient.Call(context.TODO(), rpcChannel, "timeout", "sniperHW", &resp)
-	assert.Equal(t, err.(*Error).Is(ErrServerPause), true)
-
 	as.Close(nil)
 
 	listener.Close()
