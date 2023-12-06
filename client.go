@@ -7,7 +7,7 @@ import (
 )
 
 var respWaitPool = sync.Pool{
-	New: func() interface{} { return make(chan *ResponseMsg) },
+	New: func() interface{} { return make(chan *ResponseMsg, 1) },
 }
 
 type Client struct {
