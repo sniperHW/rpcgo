@@ -68,28 +68,26 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 		if ret == nil {
 			reqMessage.Oneway = true
 			for {
-				if err = channel.SendRequest(ctx, reqMessage); err != nil {
-					if channel.IsRetryAbleError(err) {
-						time.Sleep(time.Millisecond * 10)
-						select {
-						case <-ctx.Done():
-							err = ctx.Err()
-							switch err {
-							case context.Canceled:
-								return NewError(ErrCancel, "canceled")
-							case context.DeadlineExceeded:
-								return NewError(ErrTimeout, "timeout")
-							default:
-								return err
-							}
+				if err = channel.SendRequest(ctx, reqMessage); err == nil {
+					return nil
+				} else if channel.IsRetryAbleError(err) {
+					time.Sleep(time.Millisecond * 10)
+					select {
+					case <-ctx.Done():
+						err = ctx.Err()
+						switch err {
+						case context.Canceled:
+							return NewError(ErrCancel, "canceled")
+						case context.DeadlineExceeded:
+							return NewError(ErrTimeout, "timeout")
 						default:
-							//context没有超时或被取消，继续尝试发送
+							return err
 						}
-					} else {
-						return err
+					default:
+						//context没有超时或被取消，继续尝试发送
 					}
 				} else {
-					return nil
+					return err
 				}
 			}
 		} else {
@@ -97,29 +95,7 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			wait := respWaitPool.Get().(chan *ResponseMsg)
 			for {
 				pending.Store(reqMessage.Seq, wait)
-				if err = channel.SendRequest(ctx, reqMessage); err != nil {
-					if channel.IsRetryAbleError(err) {
-						time.Sleep(time.Millisecond * 10)
-						select {
-						case <-ctx.Done():
-							pending.Delete(reqMessage.Seq)
-							err = ctx.Err()
-							switch err {
-							case context.Canceled:
-								return NewError(ErrCancel, "canceled")
-							case context.DeadlineExceeded:
-								return NewError(ErrTimeout, "timeout")
-							default:
-								return err
-							}
-						default:
-							//context没有超时或被取消，继续尝试发送
-						}
-					} else {
-						pending.Delete(reqMessage.Seq)
-						return err
-					}
-				} else {
+				if err = channel.SendRequest(ctx, reqMessage); err == nil {
 					select {
 					case resp := <-wait:
 						respWaitPool.Put(wait)
@@ -142,6 +118,26 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 							return err
 						}
 					}
+				} else if channel.IsRetryAbleError(err) {
+					time.Sleep(time.Millisecond * 10)
+					select {
+					case <-ctx.Done():
+						pending.Delete(reqMessage.Seq)
+						err = ctx.Err()
+						switch err {
+						case context.Canceled:
+							return NewError(ErrCancel, "canceled")
+						case context.DeadlineExceeded:
+							return NewError(ErrTimeout, "timeout")
+						default:
+							return err
+						}
+					default:
+						//context没有超时或被取消，继续尝试发送
+					}
+				} else {
+					pending.Delete(reqMessage.Seq)
+					return err
 				}
 			}
 		}
