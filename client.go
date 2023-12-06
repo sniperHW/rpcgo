@@ -2,33 +2,12 @@ package rpcgo
 
 import (
 	"context"
-	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-type RespCB func(interface{}, error)
-
-type callContext struct {
-	respC        chan error
-	fired        int32
-	respReceiver interface{}
-}
-
-func (c *callContext) callOnResponse(codec Codec, resp []byte, err *Error) {
-	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
-		if err == nil {
-			if e := codec.Decode(resp, c.respReceiver); e != nil {
-				logger.Errorf("callOnResponse decode error:%v", e)
-				c.respC <- errors.New("callOnResponse decode error")
-			} else {
-				c.respC <- nil
-			}
-		} else {
-			c.respC <- err
-		}
-	}
+var respWaitPool = sync.Pool{
+	New: func() interface{} { return make(chan *ResponseMsg) },
 }
 
 type Client struct {
@@ -69,7 +48,7 @@ func (c *Client) makeSequence() (seq uint64) {
 
 func (c *Client) OnMessage(resp *ResponseMsg) {
 	if ctx, ok := c.pendingCall[int(resp.Seq)%len(c.pendingCall)].LoadAndDelete(resp.Seq); ok {
-		ctx.(*callContext).callOnResponse(c.codec, resp.Ret, resp.Err)
+		ctx.(chan *ResponseMsg) <- resp
 	} else {
 		logger.Infof("onResponse with no reqContext:%d", resp.Seq)
 	}
@@ -115,12 +94,9 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			}
 		} else {
 			pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
-			callCtx := &callContext{
-				respReceiver: ret,
-				respC:        make(chan error),
-			}
+			wait := respWaitPool.Get().(chan *ResponseMsg)
 			for {
-				pending.Store(reqMessage.Seq, callCtx)
+				pending.Store(reqMessage.Seq, wait)
 				if err = channel.SendRequest(ctx, reqMessage); err != nil {
 					if channel.IsRetryAbleError(err) {
 						time.Sleep(time.Millisecond * 10)
@@ -145,10 +121,18 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 					}
 				} else {
 					select {
-					case err := <-callCtx.respC:
+					case resp := <-wait:
+						if resp.Err != nil {
+							return resp.Err
+						}
+						err = c.codec.Decode(resp.Ret, ret)
+						respWaitPool.Put(wait)
 						return err
 					case <-ctx.Done():
-						pending.Delete(reqMessage.Seq)
+						_, ok := pending.LoadAndDelete(reqMessage.Seq)
+						if ok {
+							respWaitPool.Put(wait)
+						}
 						err = ctx.Err()
 						switch err {
 						case context.Canceled:
