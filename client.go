@@ -122,12 +122,11 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 				} else {
 					select {
 					case resp := <-wait:
+						respWaitPool.Put(wait)
 						if resp.Err != nil {
 							return resp.Err
 						}
-						err = c.codec.Decode(resp.Ret, ret)
-						respWaitPool.Put(wait)
-						return err
+						return c.codec.Decode(resp.Ret, ret)
 					case <-ctx.Done():
 						_, ok := pending.LoadAndDelete(reqMessage.Seq)
 						if ok {
