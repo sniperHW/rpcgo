@@ -46,6 +46,7 @@ const (
 	ErrCancel
 	ErrMethod
 	ErrOther
+	ErrServiceUnavaliable
 	errEnd
 )
 

@@ -16,10 +16,17 @@ type Replyer struct {
 	replyed int32
 	codec   Codec
 	oneway  bool
+	s       *Server
 }
 
 func (r *Replyer) Error(err error) {
-	if !r.oneway && atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
+	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
+		if r.s != nil {
+			atomic.AddInt32(&r.s.pendingCount, -1)
+		}
+		if r.oneway {
+			return
+		}
 		resp := &ResponseMsg{
 			Seq: r.seq,
 		}
@@ -37,13 +44,20 @@ func (r *Replyer) Error(err error) {
 }
 
 func (r *Replyer) Reply(ret interface{}) {
-	if !r.oneway && atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
+	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
+		if r.s != nil {
+			atomic.AddInt32(&r.s.pendingCount, -1)
+		}
+		if r.oneway {
+			return
+		}
 		resp := &ResponseMsg{
 			Seq: r.seq,
 		}
 
 		if b, e := r.codec.Encode(ret); e != nil {
-			logger.Panicf("send rpc response to (%s) encode ret error:%s\n", r.channel.Name(), e.Error())
+			logger.Errorf("send rpc response to (%s) encode ret error:%s\n", r.channel.Name(), e.Error())
+			return
 		} else {
 			resp.Ret = b
 		}
@@ -120,14 +134,24 @@ func (c *methodCaller) call(context context.Context, codec Codec, replyer *Reply
 
 type Server struct {
 	sync.RWMutex
-	methods map[string]*methodCaller
-	codec   Codec
+	methods      map[string]*methodCaller
+	codec        Codec
+	pendingCount int32 //尚未应答的请求数量
+	stoped       atomic.Bool
 }
 
 func NewServer(codec Codec) *Server {
 	return &Server{
 		methods: map[string]*methodCaller{},
 		codec:   codec}
+}
+
+func (s *Server) Stop() {
+	s.stoped.CompareAndSwap(false, true)
+}
+
+func (s *Server) PendingCallCount() int32 {
+	return atomic.LoadInt32(&s.pendingCount)
 }
 
 func (s *Server) Register(name string, method interface{}) error {
@@ -161,6 +185,12 @@ func (s *Server) method(name string) *methodCaller {
 
 func (s *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
 	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway}
+	if s.stoped.Load() {
+		replyer.Error(NewError(ErrServiceUnavaliable, "service unavaliable"))
+		return
+	}
+	replyer.s = s
+	atomic.AddInt32(&s.pendingCount, 1)
 	if caller := s.method(req.Method); caller == nil {
 		replyer.Error(NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
 	} else {
