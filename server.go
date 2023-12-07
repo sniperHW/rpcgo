@@ -12,16 +12,14 @@ import (
 
 type Replyer struct {
 	channel Channel
-	seq     uint64
 	replyed int32
 	codec   Codec
-	oneway  bool
 	s       *Server
-	method  string
+	req     *RequestMsg
 }
 
 func (r *Replyer) Method() string {
-	return r.method
+	return r.req.Method
 }
 
 func (r *Replyer) Error(err error) {
@@ -29,11 +27,11 @@ func (r *Replyer) Error(err error) {
 		if r.s != nil {
 			atomic.AddInt32(&r.s.pendingCount, -1)
 		}
-		if r.oneway {
+		if r.req.Oneway {
 			return
 		}
 		resp := &ResponseMsg{
-			Seq: r.seq,
+			Seq: r.req.Seq,
 		}
 
 		if _, ok := err.(*Error); ok {
@@ -53,11 +51,11 @@ func (r *Replyer) Reply(ret interface{}) {
 		if r.s != nil {
 			atomic.AddInt32(&r.s.pendingCount, -1)
 		}
-		if r.oneway {
+		if r.req.Oneway {
 			return
 		}
 		resp := &ResponseMsg{
-			Seq: r.seq,
+			Seq: r.req.Seq,
 		}
 
 		if b, e := r.codec.Encode(ret); e != nil {
@@ -189,7 +187,7 @@ func (s *Server) method(name string) *methodCaller {
 }
 
 func (s *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
-	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway, method: req.Method}
+	replyer := &Replyer{channel: channel, req: req, codec: s.codec}
 	if s.stoped.Load() {
 		replyer.Error(NewError(ErrServiceUnavaliable, "service unavaliable"))
 		return
