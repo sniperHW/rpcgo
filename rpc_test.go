@@ -270,6 +270,13 @@ func TestRPC(t *testing.T) {
 	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)
 	assert.Equal(t, err.Error(), "method panic")
 
+	rpcServer.Stop()
+
+	err = rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
+	assert.Equal(t, err.(*Error).Is(ErrServiceUnavaliable), true)
+
+	assert.Equal(t, rpcServer.pendingCount, int32(0))
+
 	as.Close(nil)
 
 	listener.Close()
