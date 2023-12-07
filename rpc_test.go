@@ -179,6 +179,19 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
+	rpcServer.AddBefore(func(req *RequestMsg) error {
+		beg := time.Now()
+		//设置钩子函数,当Replyer发送应答时调用
+		req.SetReplyHook(func(req *RequestMsg, err error) {
+			if err == nil {
+				logger.Debugf("call %s(\"%v\") use:%v", req.Method, *req.GetArg().(*string), time.Now().Sub(beg))
+			} else {
+				logger.Debugf("call %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
+			}
+		})
+		return nil
+	})
+
 	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
@@ -244,6 +257,13 @@ func TestRPC(t *testing.T) {
 	err := rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
 	assert.Nil(t, err)
 	assert.Equal(t, resp, "hello world:sniperHW")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*4)
+	err = rpcClient.Call(ctx, rpcChannel, "timeout", "sniperHW", &resp)
+	cancel()
+	assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
+
+	time.Sleep(time.Second)
 
 	c := make(chan struct{})
 

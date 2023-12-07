@@ -51,10 +51,20 @@ const (
 )
 
 type RequestMsg struct {
-	Seq    uint64
-	Method string
-	Arg    []byte
-	Oneway bool
+	Seq     uint64
+	Method  string
+	Arg     []byte
+	Oneway  bool
+	arg     interface{}
+	replyer *Replyer
+}
+
+func (r RequestMsg) GetArg() interface{} {
+	return r.arg
+}
+
+func (r RequestMsg) SetReplyHook(fn func(*RequestMsg, error)) {
+	r.replyer.hook = fn
 }
 
 type ResponseMsg struct {

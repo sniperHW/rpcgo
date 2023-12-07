@@ -16,14 +16,15 @@ type Replyer struct {
 	codec   Codec
 	s       *Server
 	req     *RequestMsg
-}
-
-func (r *Replyer) Method() string {
-	return r.req.Method
+	hook    func(*RequestMsg, error)
 }
 
 func (r *Replyer) Error(err error) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
+		if r.hook != nil {
+			r.hook(r.req, err)
+		}
+
 		if r.s != nil {
 			atomic.AddInt32(&r.s.pendingCount, -1)
 		}
@@ -48,6 +49,10 @@ func (r *Replyer) Error(err error) {
 
 func (r *Replyer) Reply(ret interface{}) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
+		if r.hook != nil {
+			r.hook(r.req, nil)
+		}
+
 		if r.s != nil {
 			atomic.AddInt32(&r.s.pendingCount, -1)
 		}
@@ -117,36 +122,24 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 	return caller, nil
 }
 
-func (c *methodCaller) call(context context.Context, codec Codec, replyer *Replyer, req *RequestMsg) {
-	arg := reflect.New(c.argType).Interface()
-	if err := codec.Decode(req.Arg, arg); err == nil {
-		defer func() {
-			if r := recover(); r != nil {
-				buf := make([]byte, 65535)
-				l := runtime.Stack(buf, false)
-				logger.Errorf("method:%s channel:%s %s", c.name, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
-				replyer.Error(NewError(ErrOther, "method panic"))
-			}
-		}()
-		c.fn.Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
-	} else {
-		logger.Errorf("method:%s decode arg error:%s channel:%s", c.name, err.Error(), replyer.channel.Name())
-		replyer.Error(NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
-	}
-}
-
 type Server struct {
 	sync.RWMutex
 	methods      map[string]*methodCaller
 	codec        Codec
 	pendingCount int32 //尚未应答的请求数量
 	stoped       atomic.Bool
+	before       []func(*RequestMsg) error //前置管道线
 }
 
 func NewServer(codec Codec) *Server {
 	return &Server{
 		methods: map[string]*methodCaller{},
 		codec:   codec}
+}
+
+func (s *Server) AddBefore(fn func(*RequestMsg) error) *Server {
+	s.before = append(s.before, fn)
+	return s
 }
 
 func (s *Server) Stop() {
@@ -164,13 +157,11 @@ func (s *Server) Register(name string, method interface{}) error {
 		return errors.New("RegisterMethod nams is nil")
 	} else if caller, err := makeMethodCaller(name, method); err != nil {
 		return err
+	} else if _, ok := s.methods[name]; ok {
+		return fmt.Errorf("duplicate method:%s", name)
 	} else {
-		if _, ok := s.methods[name]; ok {
-			return fmt.Errorf("duplicate method:%s", name)
-		} else {
-			s.methods[name] = caller
-			return nil
-		}
+		s.methods[name] = caller
+		return nil
 	}
 }
 
@@ -194,9 +185,33 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 	}
 	replyer.s = s
 	atomic.AddInt32(&s.pendingCount, 1)
-	if caller := s.method(req.Method); caller == nil {
+	caller := s.method(req.Method)
+	if caller == nil {
 		replyer.Error(NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
-	} else {
-		caller.call(context, s.codec, replyer, req)
+		return
 	}
+	arg := reflect.New(caller.argType).Interface()
+	if err := s.codec.Decode(req.Arg, arg); err != nil {
+		logger.Errorf("method:%s decode arg error:%s channel:%s", req.Method, err.Error(), replyer.channel.Name())
+		replyer.Error(NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
+		return
+	}
+	req.arg = arg
+	req.replyer = replyer
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 65535)
+			l := runtime.Stack(buf, false)
+			logger.Errorf("method:%s channel:%s %s", req.Method, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
+			replyer.Error(NewError(ErrOther, "method panic"))
+		}
+	}()
+	for _, v := range s.before {
+		err := v(req)
+		if err != nil {
+			replyer.Error(NewError(ErrOther, err.Error()))
+			return
+		}
+	}
+	caller.fn.Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 }
