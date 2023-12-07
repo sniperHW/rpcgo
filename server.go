@@ -17,6 +17,11 @@ type Replyer struct {
 	codec   Codec
 	oneway  bool
 	s       *Server
+	method  string
+}
+
+func (r *Replyer) Method() string {
+	return r.method
 }
 
 func (r *Replyer) Error(err error) {
@@ -184,7 +189,7 @@ func (s *Server) method(name string) *methodCaller {
 }
 
 func (s *Server) OnMessage(context context.Context, channel Channel, req *RequestMsg) {
-	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway}
+	replyer := &Replyer{channel: channel, seq: req.Seq, codec: s.codec, oneway: req.Oneway, method: req.Method}
 	if s.stoped.Load() {
 		replyer.Error(NewError(ErrServiceUnavaliable, "service unavaliable"))
 		return
