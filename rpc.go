@@ -63,10 +63,6 @@ func (r RequestMsg) GetArg() interface{} {
 	return r.arg
 }
 
-func (r *RequestMsg) SetReplyHook(fn func(*RequestMsg, error)) {
-	r.replyer.hook = fn
-}
-
 type ResponseMsg struct {
 	Seq uint64
 	Err *Error

@@ -19,6 +19,10 @@ type Replyer struct {
 	hook    func(*RequestMsg, error)
 }
 
+func (r *Replyer) SetReplyHook(fn func(*RequestMsg, error)) {
+	r.hook = fn
+}
+
 func (r *Replyer) Error(err error) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
 		if r.hook != nil {

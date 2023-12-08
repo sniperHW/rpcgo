@@ -182,7 +182,7 @@ func TestRPC(t *testing.T) {
 	rpcServer.AddBefore(func(replyer *Replyer, req *RequestMsg) bool {
 		beg := time.Now()
 		//设置钩子函数,当Replyer发送应答时调用
-		req.SetReplyHook(func(req *RequestMsg, err error) {
+		replyer.SetReplyHook(func(req *RequestMsg, err error) {
 			if err == nil {
 				logger.Debugf("call %s(\"%v\") use:%v", req.Method, *req.GetArg().(*string), time.Now().Sub(beg))
 			} else {
