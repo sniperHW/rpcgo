@@ -201,7 +201,6 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 		return
 	}
 	req.arg = arg
-	req.replyer = replyer
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 65535)

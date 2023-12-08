@@ -51,12 +51,11 @@ const (
 )
 
 type RequestMsg struct {
-	Seq     uint64
-	Method  string
-	Arg     []byte
-	Oneway  bool
-	arg     interface{}
-	replyer *Replyer
+	Seq    uint64
+	Method string
+	Arg    []byte
+	Oneway bool
+	arg    interface{}
 }
 
 func (r RequestMsg) GetArg() interface{} {
