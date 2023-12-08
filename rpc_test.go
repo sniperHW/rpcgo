@@ -179,7 +179,7 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
-	rpcServer.AddBefore(func(req *RequestMsg) error {
+	rpcServer.AddBefore(func(replyer *Replyer, req *RequestMsg) bool {
 		beg := time.Now()
 		//设置钩子函数,当Replyer发送应答时调用
 		req.SetReplyHook(func(req *RequestMsg, err error) {
@@ -189,7 +189,7 @@ func TestRPC(t *testing.T) {
 				logger.Debugf("call %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
 			}
 		})
-		return nil
+		return true
 	})
 
 	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {

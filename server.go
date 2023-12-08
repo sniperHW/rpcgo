@@ -128,7 +128,7 @@ type Server struct {
 	codec        Codec
 	pendingCount int32 //尚未应答的请求数量
 	stoped       atomic.Bool
-	before       []func(*RequestMsg) error //前置管道线
+	before       []func(*Replyer, *RequestMsg) bool //前置管道线
 }
 
 func NewServer(codec Codec) *Server {
@@ -137,7 +137,7 @@ func NewServer(codec Codec) *Server {
 		codec:   codec}
 }
 
-func (s *Server) AddBefore(fn func(*RequestMsg) error) *Server {
+func (s *Server) AddBefore(fn func(*Replyer, *RequestMsg) bool) *Server {
 	s.before = append(s.before, fn)
 	return s
 }
@@ -207,9 +207,7 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 		}
 	}()
 	for _, v := range s.before {
-		err := v(req)
-		if err != nil {
-			replyer.Error(NewError(ErrOther, err.Error()))
+		if !v(replyer, req) {
 			return
 		}
 	}
