@@ -23,11 +23,23 @@ func (r *Replyer) SetReplyHook(fn func(*RequestMsg, error)) {
 	r.hook = fn
 }
 
+func (r *Replyer) callHook(err error) {
+	if r.hook == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 65535)
+			l := runtime.Stack(buf, false)
+			logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
+		}
+	}()
+	r.hook(r.req, err)
+}
+
 func (r *Replyer) Error(err error) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
-		if r.hook != nil {
-			r.hook(r.req, err)
-		}
+		r.callHook(err)
 
 		if r.s != nil {
 			atomic.AddInt32(&r.s.pendingCount, -1)
@@ -53,9 +65,7 @@ func (r *Replyer) Error(err error) {
 
 func (r *Replyer) Reply(ret interface{}) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
-		if r.hook != nil {
-			r.hook(r.req, nil)
-		}
+		r.callHook(nil)
 
 		if r.s != nil {
 			atomic.AddInt32(&r.s.pendingCount, -1)
