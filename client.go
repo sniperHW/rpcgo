@@ -97,7 +97,7 @@ func (c *Client) OnMessage(resp *ResponseMsg) {
 	}
 }
 
-func (c *Client) AsynCall(channel Channel, method string, arg interface{}, ret interface{}, deadline time.Time, callback func(interface{}, error)) error {
+func (c *Client) AsyncCall(channel Channel, method string, arg interface{}, ret interface{}, deadline time.Time, callback func(interface{}, error)) error {
 	b, err := c.codec.Encode(arg)
 	if err != nil {
 		return err

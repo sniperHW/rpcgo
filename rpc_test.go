@@ -262,7 +262,7 @@ func TestRPC(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, resp, "hello world:sniperHW")
 
-	err = rpcClient.AsynCall(rpcChannel, "hello", "sniperHW", &resp, time.Now().Add(time.Second), func(v interface{}, err error) {
+	err = rpcClient.AsyncCall(rpcChannel, "hello", "sniperHW", &resp, time.Now().Add(time.Second), func(v interface{}, err error) {
 		assert.Equal(t, *v.(*string), "hello world:sniperHW")
 		assert.Nil(t, err)
 	})
