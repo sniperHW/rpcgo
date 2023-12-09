@@ -216,7 +216,8 @@ type Codec interface {
 }
 
 type Channel interface {
-	SendRequest(context.Context, *RequestMsg) error
+	Request(*RequestMsg) error
+	RequestWithContext(context.Context, *RequestMsg) error
 	Reply(*ResponseMsg) error
 	Name() string
 	Identity() uint64

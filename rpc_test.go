@@ -57,8 +57,12 @@ type testChannel struct {
 	socket *netgo.AsynSocket
 }
 
-func (c *testChannel) SendRequest(ctx context.Context, request *RequestMsg) error {
+func (c *testChannel) RequestWithContext(ctx context.Context, request *RequestMsg) error {
 	return c.socket.SendWithContext(ctx, request)
+}
+
+func (c *testChannel) Request(request *RequestMsg) error {
+	return c.socket.Send(request, time.Time{})
 }
 
 func (c *testChannel) Reply(response *ResponseMsg) error {
@@ -257,6 +261,12 @@ func TestRPC(t *testing.T) {
 	err := rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
 	assert.Nil(t, err)
 	assert.Equal(t, resp, "hello world:sniperHW")
+
+	err = rpcClient.AsynCall(rpcChannel, "hello", "sniperHW", &resp, time.Now().Add(time.Second), func(v interface{}, err error) {
+		assert.Equal(t, *v.(*string), "hello world:sniperHW")
+		assert.Nil(t, err)
+	})
+	assert.Nil(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*4)
 	err = rpcClient.Call(ctx, rpcChannel, "timeout", "sniperHW", &resp)
