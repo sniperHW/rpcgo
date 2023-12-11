@@ -197,8 +197,10 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 		replyer.Error(NewError(ErrServiceUnavaliable, "service unavaliable"))
 		return
 	}
-	replyer.s = s
-	atomic.AddInt32(&s.pendingCount, 1)
+	if !req.Oneway {
+		replyer.s = s
+		atomic.AddInt32(&s.pendingCount, 1)
+	}
 	caller := s.method(req.Method)
 	if caller == nil {
 		replyer.Error(NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
