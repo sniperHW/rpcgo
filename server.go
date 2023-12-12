@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 )
@@ -29,9 +29,7 @@ func (r *Replyer) callHook(err error) {
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			buf := make([]byte, 65535)
-			l := runtime.Stack(buf, false)
-			logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
+			logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
 		}
 	}()
 	r.hook(r.req, err)
@@ -215,9 +213,7 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 	req.arg = arg
 	defer func() {
 		if r := recover(); r != nil {
-			buf := make([]byte, 65535)
-			l := runtime.Stack(buf, false)
-			logger.Errorf("method:%s channel:%s %s", req.Method, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, buf[:l])))
+			logger.Errorf("method:%s channel:%s %s", req.Method, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
 			replyer.Error(NewError(ErrOther, "method panic"))
 		}
 	}()
