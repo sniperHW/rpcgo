@@ -9,9 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/sniperHW/netgo"
 	"github.com/stretchr/testify/assert"
@@ -71,10 +71,6 @@ func (c *testChannel) Reply(response *ResponseMsg) error {
 
 func (c *testChannel) Name() string {
 	return fmt.Sprintf("%v <-> %v", c.socket.LocalAddr(), c.socket.RemoteAddr())
-}
-
-func (c *testChannel) Identity() uint64 {
-	return *(*uint64)(unsafe.Pointer(c.socket))
 }
 
 func (c *testChannel) IsRetryAbleError(_ error) bool {
@@ -248,7 +244,7 @@ func TestRPC(t *testing.T) {
 		case string:
 			close(msgChan)
 		case *ResponseMsg:
-			rpcClient.OnMessage(packet)
+			rpcClient.OnMessage(nil, packet)
 		}
 		return nil
 	}).Recv()
@@ -400,4 +396,167 @@ func TestEnDeCode(t *testing.T) {
 		assert.Equal(t, resp.Ret, []byte("hello"))
 	}
 
+}
+
+type channelInterestDisconnect struct {
+	socket      *netgo.AsynSocket
+	pendingCall sync.Map
+	counter     int
+}
+
+var errBusy error = errors.New("busy")
+
+func (c *channelInterestDisconnect) RequestWithContext(ctx context.Context, request *RequestMsg) error {
+	c.counter++
+	if c.counter < 3 {
+		return errBusy
+	}
+	return c.socket.SendWithContext(ctx, request)
+}
+
+func (c *channelInterestDisconnect) Request(request *RequestMsg) error {
+	c.counter++
+	if c.counter < 3 {
+		return errBusy
+	}
+	return c.socket.Send(request, time.Time{})
+}
+
+func (c *channelInterestDisconnect) Reply(response *ResponseMsg) error {
+	return c.socket.Send(response)
+}
+
+func (c *channelInterestDisconnect) Name() string {
+	return fmt.Sprintf("%v <-> %v", c.socket.LocalAddr(), c.socket.RemoteAddr())
+}
+
+func (c *channelInterestDisconnect) IsRetryAbleError(e error) bool {
+	if e == errBusy {
+		return true
+	}
+	return false
+}
+
+func (c *channelInterestDisconnect) OnDisconnect() {
+	c.pendingCall.Range(func(key any, value any) bool {
+		c.pendingCall.Delete(key)
+		value.(Pending).OnDisconnect()
+		return true
+	})
+}
+
+func (c *channelInterestDisconnect) PutPending(seq uint64, ctx Pending) {
+	c.pendingCall.Store(seq, ctx)
+}
+
+func (c *channelInterestDisconnect) LoadAndDeletePending(seq uint64) (interface{}, bool) {
+	return c.pendingCall.LoadAndDelete(seq)
+}
+
+func TestManagePendingChannel(t *testing.T) {
+	rpcServer := NewServer(&JsonCodec{})
+
+	rpcServer.AddBefore(func(replyer *Replyer, req *RequestMsg) bool {
+		beg := time.Now()
+		//设置钩子函数,当Replyer发送应答时调用
+		replyer.SetReplyHook(func(req *RequestMsg, err error) {
+			if err == nil {
+				logger.Debugf("call %s(\"%v\") use:%v", req.Method, *req.GetArg().(*string), time.Now().Sub(beg))
+			} else {
+				logger.Debugf("call %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
+			}
+		})
+		return true
+	})
+
+	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
+	})
+
+	rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
+		go func() {
+			time.Sleep(time.Second * 5)
+			logger.Debugf("timeout reply")
+			replyer.Reply(fmt.Sprintf("timeout hello world:%s", *arg))
+		}()
+	})
+
+	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		logger.Debugf("on new client")
+		codec := &PacketCodec{buff: make([]byte, 4096)}
+		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
+			netgo.AsynSocketOption{
+				Codec:    codec,
+				AutoRecv: true,
+			})
+		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
+			switch packet := packet.(type) {
+			case string:
+				logger.Debugf("on message")
+				as.Send(packet)
+			case *RequestMsg:
+				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
+			}
+			return nil
+		}).Recv()
+	})
+
+	go serve()
+
+	dialer := &net.Dialer{}
+	conn, _ := dialer.Dial("tcp", "localhost:8110")
+	codec := &PacketCodec{buff: make([]byte, 4096)}
+	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
+		netgo.AsynSocketOption{
+			Codec:    codec,
+			AutoRecv: true,
+		})
+
+	msgChan := make(chan struct{})
+
+	channel := &channelInterestDisconnect{socket: as}
+	rpcClient := NewClient(&JsonCodec{})
+	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
+		switch packet := packet.(type) {
+		case string:
+			close(msgChan)
+		case *ResponseMsg:
+			rpcClient.OnMessage(channel, packet)
+		}
+		return nil
+	}).SetCloseCallback(func(_ *netgo.AsynSocket, _ error) {
+		channel.OnDisconnect()
+	}).Recv()
+	as.Send("msg")
+	<-msgChan
+
+	logger.Debugf("begin rpc call")
+
+	var resp string
+	err := rpcClient.Call(context.TODO(), channel, "hello", "sniperHW", &resp)
+	assert.Nil(t, err)
+	assert.Equal(t, resp, "hello world:sniperHW")
+
+	err = rpcClient.AsyncCall(channel, "hello", "sniperHW", &resp, time.Now().Add(time.Second), func(v interface{}, err error) {
+		assert.Equal(t, *v.(*string), "hello world:sniperHW")
+		assert.Nil(t, err)
+	})
+	assert.Nil(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*4)
+	err = rpcClient.Call(ctx, channel, "timeout", "sniperHW", &resp)
+	cancel()
+	assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
+
+	go func() {
+		time.Sleep(time.Second)
+		as.Close(nil)
+	}()
+
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second*4)
+	err = rpcClient.Call(ctx, channel, "timeout", "sniperHW", &resp)
+	cancel()
+	assert.Equal(t, err.(*Error).Is(ErrDisconnet), true)
+
+	listener.Close()
 }

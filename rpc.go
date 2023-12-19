@@ -47,6 +47,7 @@ const (
 	ErrMethod
 	ErrOther
 	ErrServiceUnavaliable
+	ErrDisconnet
 	errEnd
 )
 
@@ -87,15 +88,15 @@ func EncodeRequest(req *RequestMsg) []byte {
 		method = method[:maxMethodLen]
 	}
 
-	buff := make([]byte, 11, reqHdrLen+len(method)+len(req.Arg))
+	buff := make([]byte, reqHdrLen, reqHdrLen+len(method)+len(req.Arg))
 
 	binary.BigEndian.PutUint64(buff, req.Seq)
 
 	if req.Oneway {
-		buff[8] = byte(1)
+		buff[lenSeq] = byte(1)
 	}
 
-	binary.BigEndian.PutUint16(buff[9:], uint16(len(req.Method)))
+	binary.BigEndian.PutUint16(buff[lenSeq+lenOneWay:], uint16(len(req.Method)))
 
 	buff = append(buff, method...)
 
@@ -145,19 +146,19 @@ func EncodeResponse(resp *ResponseMsg) []byte {
 	var errByte []byte
 
 	if resp.Err == nil {
-		buff = make([]byte, 10, respHdrLen+len(resp.Ret))
+		buff = make([]byte, respHdrLen, respHdrLen+len(resp.Ret))
 	} else {
 		errByte = []byte(resp.Err.str)
 		if len(errByte) > maxErrStrLen {
 			errByte = errByte[:maxErrStrLen]
 		}
-		buff = make([]byte, 10, respHdrLen+lenErrStr+len(errByte)+len(resp.Ret))
+		buff = make([]byte, respHdrLen, respHdrLen+lenErrStr+len(errByte)+len(resp.Ret))
 	}
 
 	binary.BigEndian.PutUint64(buff, resp.Seq)
 
 	if resp.Err != nil {
-		binary.BigEndian.PutUint16(buff[8:], uint16(resp.Err.code))
+		binary.BigEndian.PutUint16(buff[lenSeq:], uint16(resp.Err.code))
 		errStrLen := []byte{0, 0}
 		binary.BigEndian.PutUint16(errStrLen, uint16(len(errByte)))
 		buff = append(buff, errStrLen...)
@@ -220,6 +221,20 @@ type Channel interface {
 	RequestWithContext(context.Context, *RequestMsg) error
 	Reply(*ResponseMsg) error
 	Name() string
-	Identity() uint64
 	IsRetryAbleError(error) bool
+}
+
+/*
+ *  默认情况下不关注channel的断开事件，如果需要在channel断开的时候
+ *  快速中断等待中的RPC，使用者需要额外实现ChannelInterestDisconnect接口，自己管理调用上下文
+ */
+
+type Pending interface {
+	OnDisconnect()
+}
+
+type ChannelInterestDisconnect interface {
+	OnDisconnect()
+	PutPending(uint64, Pending)
+	LoadAndDeletePending(uint64) (interface{}, bool)
 }
