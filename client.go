@@ -25,7 +25,7 @@ func (sc syncContext) OnDisconnect() {
 
 type asynContext struct {
 	onResponse func(interface{}, error)
-	timer      *time.Timer
+	timer      *Timer
 	fired      int32
 	ret        interface{}
 }
@@ -60,6 +60,7 @@ func (c *asynContext) onTimeout() {
 
 type Client struct {
 	sync.Mutex
+	timedHeap
 	nextSequence uint32
 	timestamp    uint32
 	timeOffset   uint32
@@ -138,7 +139,7 @@ func (c *Client) AsyncCall(channel Channel, method string, arg interface{}, ret 
 		ctx.onResponse = callback
 		ctx.ret = ret
 		c.putPending(channel, reqMessage.Seq, ctx)
-		ctx.timer = time.AfterFunc(time.Until(deadline), func() {
+		ctx.timer = c.afterFunc(time.Until(deadline), func() {
 			if _, ok := c.loadAndDeletePending(channel, reqMessage.Seq); ok {
 				ctx.onTimeout()
 			}

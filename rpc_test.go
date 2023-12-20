@@ -97,18 +97,17 @@ func (codec *PacketCodec) Decode(b []byte) (interface{}, error) {
 }
 
 func (codec *PacketCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers, int) {
-	logger.Debugf("pack %v", o)
 	var headBytes []byte
 	var dataBytes []byte
 	switch o := o.(type) {
 	case *RequestMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_request)
-		dataBytes = EncodeRequest(o) //json.Marshal(o)
+		dataBytes = EncodeRequest(o)
 	case *ResponseMsg:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_rpc_response)
-		dataBytes = EncodeResponse(o) //json.Marshal(o)
+		dataBytes = EncodeResponse(o)
 	case string:
 		headBytes = AppendUint32(headBytes, 0)
 		headBytes = AppendByte(headBytes, packet_msg)
@@ -134,9 +133,8 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 	for {
 		rr := codec.r
 		pktLen := 0
-		if (codec.w - rr) >= lenHead { //&& uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
+		if (codec.w - rr) >= lenHead {
 			pktLen = int(binary.BigEndian.Uint32(codec.buff[rr:]))
-			logger.Debugf("on packet pktLen %d", pktLen)
 			rr += lenHead
 		}
 
@@ -166,7 +164,6 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 
 		var n int
 		n, err = codec.read(readable, deadline)
-		logger.Debugf("on read %d", n)
 		if n > 0 {
 			codec.w += n
 		}
