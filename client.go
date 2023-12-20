@@ -8,23 +8,18 @@ import (
 )
 
 var syncCtxPool = sync.Pool{
-	New: func() interface{} { return &syncContext{ch: make(chan *ResponseMsg, 1)} },
+	New: func() interface{} { return syncContext(make(chan *ResponseMsg, 1)) },
 }
 
 var asynCtxPool = sync.Pool{
 	New: func() interface{} { return &asynContext{} },
 }
 
-type syncContext struct {
-	ch chan *ResponseMsg
-}
+type syncContext chan *ResponseMsg
 
-func (sc *syncContext) OnDisconnect() {
-	select {
-	case sc.ch <- &ResponseMsg{
+func (sc syncContext) OnDisconnect() {
+	sc <- &ResponseMsg{
 		Err: NewError(ErrDisconnet, "disconnect"),
-	}:
-	default:
 	}
 }
 
@@ -110,8 +105,8 @@ func (c *Client) OnMessage(channel ChannelInterestDisconnect, resp *ResponseMsg)
 
 	if ok {
 		switch v := ctx.(type) {
-		case *syncContext:
-			v.ch <- resp
+		case syncContext:
+			v <- resp
 		case *asynContext:
 			ok := v.timer.Stop()
 			v.callOnResponse(c.codec, resp.Ret, resp.Err)
@@ -142,16 +137,15 @@ func (c *Client) AsyncCall(channel Channel, method string, arg interface{}, ret 
 		ctx.fired = 0
 		ctx.onResponse = callback
 		ctx.ret = ret
-		pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
-		c.putPending(channel, pending, reqMessage.Seq, ctx)
+		c.putPending(channel, reqMessage.Seq, ctx)
 		ctx.timer = time.AfterFunc(time.Until(deadline), func() {
-			if _, ok := c.loadAndDeletePending(channel, pending, reqMessage.Seq); ok {
+			if _, ok := c.loadAndDeletePending(channel, reqMessage.Seq); ok {
 				ctx.onTimeout()
 			}
 		})
 		err = channel.Request(reqMessage)
 		if err != nil {
-			if _, ok := c.loadAndDeletePending(channel, pending, reqMessage.Seq); ok {
+			if _, ok := c.loadAndDeletePending(channel, reqMessage.Seq); ok {
 				if ctx.timer.Stop() {
 					asynCtxPool.Put(ctx)
 				}
@@ -161,27 +155,41 @@ func (c *Client) AsyncCall(channel Channel, method string, arg interface{}, ret 
 	}
 }
 
-func (c *Client) putPending(channel Channel, pending *sync.Map, seq uint64, ctx interface{}) {
+func (c *Client) putPending(channel Channel, seq uint64, ctx interface{}) {
 	if cc, ok := channel.(ChannelInterestDisconnect); ok {
-		cc.PutPending(seq, ctx.(Pending))
+		cc.PutPending(seq, ctx.(PendingCall))
 	} else {
+		pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
 		pending.Store(seq, ctx)
 	}
 }
 
-func (c *Client) loadAndDeletePending(channel Channel, pending *sync.Map, seq uint64) (interface{}, bool) {
+func (c *Client) loadAndDeletePending(channel Channel, seq uint64) (interface{}, bool) {
 	if cc, ok := channel.(ChannelInterestDisconnect); ok {
 		return cc.LoadAndDeletePending(seq)
 	} else {
+		pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
 		return pending.LoadAndDelete(seq)
 	}
 }
 
-func (c *Client) deletePending(channel Channel, pending *sync.Map, seq uint64) {
+func (c *Client) deletePending(channel Channel, seq uint64) {
 	if cc, ok := channel.(ChannelInterestDisconnect); ok {
 		cc.LoadAndDeletePending(seq)
 	} else {
+		pending := &c.pendingCall[int(seq)%len(c.pendingCall)]
 		pending.Delete(seq)
+	}
+}
+
+func rpcError(err error) *Error {
+	switch err {
+	case context.Canceled:
+		return NewError(ErrCancel, "canceled")
+	case context.DeadlineExceeded:
+		return NewError(ErrTimeout, "timeout")
+	default:
+		return NewError(ErrOther, err.Error())
 	}
 }
 
@@ -206,30 +214,21 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 				time.Sleep(time.Millisecond * 10)
 				select {
 				case <-ctx.Done():
-					err = ctx.Err()
-					switch err {
-					case context.Canceled:
-						return NewError(ErrCancel, "canceled")
-					case context.DeadlineExceeded:
-						return NewError(ErrTimeout, "timeout")
-					default:
-						return NewError(ErrOther, err.Error())
-					}
+					return rpcError(ctx.Err())
 				default:
 					//context没有超时或被取消，继续尝试发送
 				}
 			} else {
-				return NewError(ErrOther, err.Error())
+				return rpcError(err)
 			}
 		}
 	} else {
-		pending := &c.pendingCall[int(reqMessage.Seq)%len(c.pendingCall)]
-		syncCtx := syncCtxPool.Get().(*syncContext)
-		c.putPending(channel, pending, reqMessage.Seq, syncCtx)
+		syncCtx := syncCtxPool.Get().(syncContext)
+		c.putPending(channel, reqMessage.Seq, syncCtx)
 		for {
 			if err = channel.RequestWithContext(ctx, reqMessage); err == nil {
 				select {
-				case resp := <-syncCtx.ch:
+				case resp := <-syncCtx:
 					syncCtxPool.Put(syncCtx)
 					if resp.Err != nil {
 						return resp.Err
@@ -237,43 +236,28 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 					if err = c.codec.Decode(resp.Ret, ret); err == nil {
 						return nil
 					} else {
-						return NewError(ErrOther, err.Error())
+						return rpcError(err)
 					}
 				case <-ctx.Done():
-					_, ok := c.loadAndDeletePending(channel, pending, reqMessage.Seq)
-					if ok {
+					if _, ok := c.loadAndDeletePending(channel, reqMessage.Seq); ok {
 						syncCtxPool.Put(syncCtx)
 					}
-					err = ctx.Err()
-					switch err {
-					case context.Canceled:
-						return NewError(ErrCancel, "canceled")
-					case context.DeadlineExceeded:
-						return NewError(ErrTimeout, "timeout")
-					default:
-						return NewError(ErrOther, err.Error())
-					}
+					return rpcError(ctx.Err())
 				}
 			} else if channel.IsRetryAbleError(err) {
 				time.Sleep(time.Millisecond * 10)
 				select {
 				case <-ctx.Done():
-					c.deletePending(channel, pending, reqMessage.Seq)
-					err = ctx.Err()
-					switch err {
-					case context.Canceled:
-						return NewError(ErrCancel, "canceled")
-					case context.DeadlineExceeded:
-						return NewError(ErrTimeout, "timeout")
-					default:
-						return NewError(ErrOther, err.Error())
-					}
+					c.deletePending(channel, reqMessage.Seq)
+					syncCtxPool.Put(syncCtx)
+					return rpcError(ctx.Err())
 				default:
 					//context没有超时或被取消，继续尝试发送
 				}
 			} else {
-				c.deletePending(channel, pending, reqMessage.Seq)
-				return NewError(ErrOther, err.Error())
+				c.deletePending(channel, reqMessage.Seq)
+				syncCtxPool.Put(syncCtx)
+				return rpcError(err)
 			}
 		}
 	}

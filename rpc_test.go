@@ -440,12 +440,12 @@ func (c *channelInterestDisconnect) IsRetryAbleError(e error) bool {
 func (c *channelInterestDisconnect) OnDisconnect() {
 	c.pendingCall.Range(func(key any, value any) bool {
 		c.pendingCall.Delete(key)
-		value.(Pending).OnDisconnect()
+		value.(PendingCall).OnDisconnect()
 		return true
 	})
 }
 
-func (c *channelInterestDisconnect) PutPending(seq uint64, ctx Pending) {
+func (c *channelInterestDisconnect) PutPending(seq uint64, ctx PendingCall) {
 	c.pendingCall.Store(seq, ctx)
 }
 

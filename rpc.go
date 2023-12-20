@@ -229,12 +229,12 @@ type Channel interface {
  *  快速中断等待中的RPC，使用者需要额外实现ChannelInterestDisconnect接口，自己管理调用上下文
  */
 
-type Pending interface {
+type PendingCall interface {
 	OnDisconnect()
 }
 
 type ChannelInterestDisconnect interface {
 	OnDisconnect()
-	PutPending(uint64, Pending)
+	PutPending(uint64, PendingCall)
 	LoadAndDeletePending(uint64) (interface{}, bool)
 }
