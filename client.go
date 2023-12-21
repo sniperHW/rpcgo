@@ -194,6 +194,12 @@ func rpcError(err error) *Error {
 	}
 }
 
+func (c *Client) CallWithTimeout(channel Channel, method string, arg interface{}, ret interface{}, d time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	return c.Call(ctx, channel, method, arg, ret)
+}
+
 func (c *Client) Call(ctx context.Context, channel Channel, method string, arg interface{}, ret interface{}) error {
 	b, err := c.codec.Encode(arg)
 	if err != nil {
