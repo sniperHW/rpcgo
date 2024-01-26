@@ -173,6 +173,95 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 	}
 }
 
+func TestCaller(t *testing.T) {
+	rpcServer := NewServer(&JsonCodec{})
+
+	rpcServer.AddBefore(func(replyer *Replyer, req *RequestMsg) bool {
+		beg := time.Now()
+		//设置钩子函数,当Replyer发送应答时调用
+		replyer.SetReplyHook(func(req *RequestMsg, err error) {
+			if err == nil {
+				logger.Debugf("call %s(\"%v\") use:%v", req.Method, *req.GetArg().(*string), time.Now().Sub(beg))
+			} else {
+				logger.Debugf("call %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
+			}
+		})
+		return true
+	})
+
+	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
+	})
+
+	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		logger.Debugf("on new client")
+		codec := &PacketCodec{buff: make([]byte, 4096)}
+		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
+			netgo.AsynSocketOption{
+				Codec:    codec,
+				AutoRecv: true,
+			})
+		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
+			switch packet := packet.(type) {
+			case string:
+				logger.Debugf("on message")
+				as.Send(packet)
+			case *RequestMsg:
+				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
+			}
+			return nil
+		}).Recv()
+	})
+
+	go serve()
+
+	dialer := &net.Dialer{}
+	conn, _ := dialer.Dial("tcp", "localhost:8110")
+	codec := &PacketCodec{buff: make([]byte, 4096)}
+	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
+		netgo.AsynSocketOption{
+			Codec:    codec,
+			AutoRecv: true,
+		})
+
+	msgChan := make(chan struct{})
+
+	rpcChannel := &testChannel{socket: as}
+	rpcClient := NewClient(&JsonCodec{})
+	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
+		switch packet := packet.(type) {
+		case string:
+			close(msgChan)
+		case *ResponseMsg:
+			rpcClient.OnMessage(nil, packet)
+		}
+		return nil
+	}).Recv()
+
+	caller := MakeCaller[string, string](rpcClient, "hello", rpcChannel)
+
+	caller.Oneway(CallerOpt{}, MakeArgument("Oneway"))
+
+	r, err := caller.Call(CallerOpt{Timeout: time.Second}, MakeArgument("CallWithTimeout"))
+	if err == nil {
+		fmt.Println(*r, err)
+	}
+
+	c := make(chan struct{})
+
+	err = caller.AsyncCall(CallerOpt{}, MakeArgument("AsyncCall"), func(r *string, err error) {
+		if err == nil {
+			fmt.Println(*r, err)
+		}
+		close(c)
+	})
+
+	<-c
+
+	as.Close(nil)
+	listener.Close()
+}
+
 func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
@@ -297,8 +386,6 @@ func TestRPC(t *testing.T) {
 
 	err = rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
 	assert.Equal(t, err.(*Error).Is(ErrServiceUnavaliable), true)
-
-	assert.Equal(t, rpcServer.pendingCount, int32(0))
 
 	as.Close(nil)
 

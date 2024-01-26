@@ -68,13 +68,12 @@ func newClient() (*Client, *testChannel) {
 func Benchmark_Call(b *testing.B) {
 	listener, _ := startServer()
 	cli, channel := newClient()
-	ctx := context.Background()
+	caller := MakeCaller[string, string](cli, "hello", channel)
 	b.ResetTimer()
 	b.StartTimer()
 	defer b.StopTimer()
 	for i := 0; i < b.N; i++ {
-		var resp string
-		err := cli.Call(ctx, channel, "hello", "sniperHW", &resp)
+		_, err := caller.Call(CallerOpt{}, MakeArgument("sniperHW"))
 		if err != nil {
 			b.Fatal(err.Error())
 		}
@@ -85,14 +84,13 @@ func Benchmark_Call(b *testing.B) {
 func Benchmark_Call_Concurrency(b *testing.B) {
 	listener, _ := startServer()
 	cli, channel := newClient()
-	ctx := context.Background()
+	caller := MakeCaller[string, string](cli, "hello", channel)
 	b.ResetTimer()
 	b.StartTimer()
 	defer b.StopTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			var resp string
-			err := cli.Call(ctx, channel, "hello", "sniperHW", &resp)
+			_, err := caller.Call(CallerOpt{}, MakeArgument("sniperHW"))
 			if err != nil {
 				b.Fatal(err.Error())
 			}

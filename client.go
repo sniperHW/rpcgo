@@ -2,6 +2,7 @@ package rpcgo
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -268,4 +269,106 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 			}
 		}
 	}
+}
+
+//helper
+
+func MakeArgument[T any](v T) *T {
+	return &v
+}
+
+func MakeCaller[Arg any, Ret any](cli *Client, method string, channel ...Channel) *Caller[Arg, Ret] {
+	c := &Caller[Arg, Ret]{
+		c:      cli,
+		method: method,
+	}
+	if len(channel) > 0 {
+		c.channel = channel[0]
+	}
+	return c
+}
+
+type Caller[Arg any, Ret any] struct {
+	channel Channel
+	method  string
+	c       *Client
+}
+
+type CallerOpt struct {
+	Channel Channel
+	Context context.Context
+	Timeout time.Duration
+}
+
+func (c *Caller[Arg, Ret]) SetChannel(channel Channel) *Caller[Arg, Ret] {
+	c.channel = channel
+	return c
+}
+
+func (c *Caller[Arg, Ret]) Oneway(opt CallerOpt, arg *Arg) error {
+	var channel Channel
+	if opt.Channel != nil {
+		channel = opt.Channel
+	} else {
+		channel = c.channel
+	}
+	if channel == nil {
+		return errors.New("channel is nil")
+	}
+	if opt.Timeout > 0 {
+		return c.c.CallWithTimeout(channel, c.method, arg, nil, opt.Timeout)
+	} else if opt.Context != nil {
+		return c.c.Call(opt.Context, channel, c.method, arg, nil)
+	} else {
+		return c.c.Call(context.Background(), channel, c.method, arg, nil)
+	}
+}
+
+func (c *Caller[Arg, Ret]) Call(opt CallerOpt, arg *Arg) (*Ret, error) {
+	var res Ret
+	var err error
+	var channel Channel
+	if opt.Channel != nil {
+		channel = opt.Channel
+	} else {
+		channel = c.channel
+	}
+
+	if channel == nil {
+		return nil, errors.New("channel is nil")
+	}
+
+	if opt.Timeout > 0 {
+		err = c.c.CallWithTimeout(channel, c.method, arg, &res, opt.Timeout)
+	} else if opt.Context != nil {
+		err = c.c.Call(opt.Context, channel, c.method, *arg, &res)
+	} else {
+		err = c.c.Call(context.Background(), channel, c.method, *arg, &res)
+	}
+	return &res, err
+}
+
+func (c *Caller[Arg, Ret]) AsyncCall(opt CallerOpt, arg *Arg, callback func(*Ret, error)) error {
+	var res Ret
+	var channel Channel
+	var deadline time.Time
+	if opt.Channel != nil {
+		channel = opt.Channel
+	} else {
+		channel = c.channel
+	}
+
+	if channel == nil {
+		return errors.New("channel is nil")
+	}
+
+	if opt.Timeout > 0 {
+		deadline = time.Now().Add(opt.Timeout)
+	} else {
+		deadline = time.Now().Add(time.Second)
+	}
+
+	return c.c.AsyncCall(channel, c.method, arg, &res, deadline, func(_ interface{}, err error) {
+		callback(&res, err)
+	})
 }

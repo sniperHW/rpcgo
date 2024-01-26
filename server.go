@@ -14,7 +14,6 @@ type Replyer struct {
 	channel Channel
 	replyed int32
 	codec   Codec
-	s       *Server
 	req     *RequestMsg
 	hook    func(*RequestMsg, error)
 }
@@ -38,10 +37,6 @@ func (r *Replyer) callHook(err error) {
 func (r *Replyer) Error(err error) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
 		r.callHook(err)
-
-		if r.s != nil {
-			atomic.AddInt32(&r.s.pendingCount, -1)
-		}
 		if r.req.Oneway {
 			return
 		}
@@ -64,10 +59,6 @@ func (r *Replyer) Error(err error) {
 func (r *Replyer) Reply(ret interface{}) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
 		r.callHook(nil)
-
-		if r.s != nil {
-			atomic.AddInt32(&r.s.pendingCount, -1)
-		}
 		if r.req.Oneway {
 			return
 		}
@@ -136,11 +127,10 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 
 type Server struct {
 	sync.RWMutex
-	methods      map[string]*methodCaller
-	codec        Codec
-	pendingCount int32 //尚未应答的请求数量
-	stoped       atomic.Bool
-	before       []func(*Replyer, *RequestMsg) bool //前置管道线
+	methods map[string]*methodCaller
+	codec   Codec
+	stoped  atomic.Bool
+	before  []func(*Replyer, *RequestMsg) bool //前置管道线
 }
 
 func NewServer(codec Codec) *Server {
@@ -156,10 +146,6 @@ func (s *Server) AddBefore(fn func(*Replyer, *RequestMsg) bool) *Server {
 
 func (s *Server) Stop() {
 	s.stoped.CompareAndSwap(false, true)
-}
-
-func (s *Server) PendingCallCount() int32 {
-	return atomic.LoadInt32(&s.pendingCount)
 }
 
 func (s *Server) Register(name string, method interface{}) error {
@@ -194,10 +180,6 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 	if s.stoped.Load() {
 		replyer.Error(NewError(ErrServiceUnavaliable, "service unavaliable"))
 		return
-	}
-	if !req.Oneway {
-		replyer.s = s
-		atomic.AddInt32(&s.pendingCount, 1)
 	}
 	caller := s.method(req.Method)
 	if caller == nil {
