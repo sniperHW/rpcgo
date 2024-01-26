@@ -175,19 +175,18 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 
 func TestCaller(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
-
-	rpcServer.AddBefore(func(replyer *Replyer, req *RequestMsg) bool {
+	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
 		beg := time.Now()
 		//设置钩子函数,当Replyer发送应答时调用
-		replyer.SetReplyHook(func(req *RequestMsg, err error) {
+		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
 			if err == nil {
-				logger.Debugf("call %s(\"%v\") use:%v", req.Method, *req.GetArg().(*string), time.Now().Sub(beg))
+				logger.Debugf("serve %s(\"%v\") resp:%v use:%v", req.Method, *req.GetArg().(*string), ret, time.Now().Sub(beg))
 			} else {
-				logger.Debugf("call %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
+				logger.Debugf("serve %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
 			}
 		})
 		return true
-	})
+	}))
 
 	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
@@ -265,18 +264,18 @@ func TestCaller(t *testing.T) {
 func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
-	rpcServer.AddBefore(func(replyer *Replyer, req *RequestMsg) bool {
+	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
 		beg := time.Now()
 		//设置钩子函数,当Replyer发送应答时调用
-		replyer.SetReplyHook(func(req *RequestMsg, err error) {
+		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
 			if err == nil {
-				logger.Debugf("call %s(\"%v\") use:%v", req.Method, *req.GetArg().(*string), time.Now().Sub(beg))
+				logger.Debugf("serve %s(\"%v\") resp:%v use:%v", req.Method, *req.GetArg().(*string), ret, time.Now().Sub(beg))
 			} else {
-				logger.Debugf("call %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
+				logger.Debugf("serve %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
 			}
 		})
 		return true
-	})
+	}))
 
 	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
@@ -325,6 +324,26 @@ func TestRPC(t *testing.T) {
 
 	rpcChannel := &testChannel{socket: as}
 	rpcClient := NewClient(&JsonCodec{})
+
+	var pendingCall sync.Map
+
+	rpcClient.SetOutInterceptor([]func(*RequestMsg, interface{}){
+		func(req *RequestMsg, arg interface{}) {
+			if !req.Oneway {
+				pendingCall.Store(req.Seq, time.Now())
+			}
+		},
+	})
+
+	rpcClient.SetInInterceptor([]func(*RequestMsg, interface{}, error){
+		func(req *RequestMsg, ret interface{}, err error) {
+			v, ok := pendingCall.LoadAndDelete(req.Seq)
+			if ok {
+				logger.Debugf("call %v(seq:%d,arg:%v,ret:%v,err:%v) use:%v", req.Method, req.Seq, req.GetArg(), ret, err, time.Now().Sub(v.(time.Time)))
+			}
+		},
+	})
+
 	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
 		switch packet := packet.(type) {
 		case string:
@@ -540,19 +559,18 @@ func (c *channelInterestDisconnect) LoadAndDeletePending(seq uint64) (interface{
 func TestManagePendingChannel(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 
-	rpcServer.AddBefore(func(replyer *Replyer, req *RequestMsg) bool {
+	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
 		beg := time.Now()
 		//设置钩子函数,当Replyer发送应答时调用
-		replyer.SetReplyHook(func(req *RequestMsg, err error) {
+		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
 			if err == nil {
-				logger.Debugf("call %s(\"%v\") use:%v", req.Method, *req.GetArg().(*string), time.Now().Sub(beg))
+				logger.Debugf("serve %s(\"%v\") resp:%v use:%v", req.Method, *req.GetArg().(*string), ret, time.Now().Sub(beg))
 			} else {
-				logger.Debugf("call %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
+				logger.Debugf("serve %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
 			}
 		})
 		return true
-	})
-
+	}))
 	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})

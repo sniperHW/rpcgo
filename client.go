@@ -3,6 +3,8 @@ package rpcgo
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,11 +31,15 @@ type asynContext struct {
 	timer      *Timer
 	fired      int32
 	ret        interface{}
+	req        *RequestMsg
+	cli        *Client
 }
 
 func (c *asynContext) OnDisconnect() {
 	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
-		c.onResponse(nil, NewError(ErrDisconnet, "disconnect"))
+		err := NewError(ErrDisconnet, "disconnect")
+		c.cli.callInInterceptor(c.req, nil, err)
+		c.onResponse(nil, err)
 	}
 }
 
@@ -42,11 +48,15 @@ func (c *asynContext) callOnResponse(codec Codec, resp []byte, err *Error) {
 		if err == nil {
 			if e := codec.Decode(resp, c.ret); e != nil {
 				logger.Errorf("callOnResponse decode error:%v", e)
-				c.onResponse(nil, NewError(ErrOther, "decode resp.Ret"))
+				err = NewError(ErrOther, "decode resp.Ret")
+				c.cli.callInInterceptor(c.req, nil, err)
+				c.onResponse(nil, err)
 			} else {
+				c.cli.callInInterceptor(c.req, c.ret, nil)
 				c.onResponse(c.ret, nil)
 			}
 		} else {
+			c.cli.callInInterceptor(c.req, nil, err)
 			c.onResponse(nil, err)
 		}
 	}
@@ -54,7 +64,9 @@ func (c *asynContext) callOnResponse(codec Codec, resp []byte, err *Error) {
 
 func (c *asynContext) onTimeout() {
 	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
-		c.onResponse(nil, NewError(ErrTimeout, "timeout"))
+		err := NewError(ErrTimeout, "timeout")
+		c.cli.callInInterceptor(c.req, nil, err)
+		c.onResponse(nil, err)
 		asynCtxPool.Put(c)
 	}
 }
@@ -62,12 +74,14 @@ func (c *asynContext) onTimeout() {
 type Client struct {
 	sync.Mutex
 	timedHeap
-	nextSequence uint32
-	timestamp    uint32
-	timeOffset   uint32
-	startTime    time.Time
-	codec        Codec
-	pendingCall  [32]sync.Map
+	nextSequence   uint32
+	timestamp      uint32
+	timeOffset     uint32
+	startTime      time.Time
+	codec          Codec
+	pendingCall    [32]sync.Map
+	inInterceptor  []func(*RequestMsg, interface{}, error) //入站管道线
+	outInterceptor []func(*RequestMsg, interface{})        //出站管道线
 }
 
 func NewClient(codec Codec) *Client {
@@ -75,6 +89,40 @@ func NewClient(codec Codec) *Client {
 		codec:      codec,
 		timeOffset: uint32(time.Now().Unix() - time.Date(2023, time.January, 1, 0, 0, 0, 0, time.Local).Unix()),
 		startTime:  time.Now(),
+	}
+}
+
+func (c *Client) SetInInterceptor(interceptor []func(*RequestMsg, interface{}, error)) {
+	c.inInterceptor = interceptor
+}
+
+func (c *Client) SetOutInterceptor(interceptor []func(*RequestMsg, interface{})) {
+	c.outInterceptor = interceptor
+}
+
+func (c *Client) callInInterceptor(req *RequestMsg, ret interface{}, err error) {
+	for _, fn := range c.inInterceptor {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
+				}
+			}()
+			fn(req, ret, err)
+		}()
+	}
+}
+
+func (c *Client) callOutInterceptor(req *RequestMsg, arg interface{}) {
+	for _, fn := range c.outInterceptor {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
+				}
+			}()
+			fn(req, arg)
+		}()
 	}
 }
 
@@ -130,7 +178,9 @@ func (c *Client) AsyncCall(channel Channel, method string, arg interface{}, ret 
 		Seq:    c.makeSequence(),
 		Method: method,
 		Arg:    b,
+		arg:    arg,
 	}
+	c.callOutInterceptor(reqMessage, arg)
 	if ret == nil || callback == nil {
 		reqMessage.Oneway = true
 		return channel.Request(reqMessage)
@@ -139,6 +189,8 @@ func (c *Client) AsyncCall(channel Channel, method string, arg interface{}, ret 
 		ctx.fired = 0
 		ctx.onResponse = callback
 		ctx.ret = ret
+		ctx.req = reqMessage
+		ctx.cli = c
 		c.putPending(channel, reqMessage.Seq, ctx)
 		ctx.timer = c.afterFunc(time.Until(deadline), func() {
 			if _, ok := c.loadAndDeletePending(channel, reqMessage.Seq); ok {
@@ -151,6 +203,9 @@ func (c *Client) AsyncCall(channel Channel, method string, arg interface{}, ret 
 				if ctx.timer.Stop() {
 					asynCtxPool.Put(ctx)
 				}
+			}
+			if atomic.CompareAndSwapInt32(&ctx.fired, 0, 1) {
+				c.callInInterceptor(reqMessage, nil, err)
 			}
 		}
 		return err
@@ -201,7 +256,7 @@ func (c *Client) CallWithTimeout(channel Channel, method string, arg interface{}
 	return c.Call(ctx, channel, method, arg, ret)
 }
 
-func (c *Client) Call(ctx context.Context, channel Channel, method string, arg interface{}, ret interface{}) error {
+func (c *Client) Call(ctx context.Context, channel Channel, method string, arg interface{}, ret interface{}) (err error) {
 	b, err := c.codec.Encode(arg)
 	if err != nil {
 		return err
@@ -211,8 +266,12 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 		Seq:    c.makeSequence(),
 		Method: method,
 		Arg:    b,
+		arg:    arg,
 	}
-
+	c.callOutInterceptor(reqMessage, arg)
+	defer func() {
+		c.callInInterceptor(reqMessage, ret, err)
+	}()
 	if ret == nil {
 		reqMessage.Oneway = true
 		for {
@@ -222,12 +281,14 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 				time.Sleep(time.Millisecond * 10)
 				select {
 				case <-ctx.Done():
-					return rpcError(ctx.Err())
+					err = rpcError(ctx.Err())
+					return err
 				default:
 					//context没有超时或被取消，继续尝试发送
 				}
 			} else {
-				return rpcError(err)
+				err = rpcError(err)
+				return err
 			}
 		}
 	} else {
@@ -239,18 +300,21 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 				case resp := <-syncCtx:
 					syncCtxPool.Put(syncCtx)
 					if resp.Err != nil {
-						return resp.Err
+						err = resp.Err
+						return err
 					}
 					if err = c.codec.Decode(resp.Ret, ret); err == nil {
-						return nil
+						return err
 					} else {
-						return rpcError(err)
+						err = rpcError(err)
+						return err
 					}
 				case <-ctx.Done():
 					if _, ok := c.loadAndDeletePending(channel, reqMessage.Seq); ok {
 						syncCtxPool.Put(syncCtx)
 					}
-					return rpcError(ctx.Err())
+					err = rpcError(ctx.Err())
+					return err
 				}
 			} else if channel.IsRetryAbleError(err) {
 				time.Sleep(time.Millisecond * 10)
@@ -258,14 +322,16 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 				case <-ctx.Done():
 					c.deletePending(channel, reqMessage.Seq)
 					syncCtxPool.Put(syncCtx)
-					return rpcError(ctx.Err())
+					err = rpcError(ctx.Err())
+					return err
 				default:
 					//context没有超时或被取消，继续尝试发送
 				}
 			} else {
 				c.deletePending(channel, reqMessage.Seq)
 				syncCtxPool.Put(syncCtx)
-				return rpcError(err)
+				err = rpcError(err)
+				return err
 			}
 		}
 	}

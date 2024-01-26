@@ -11,32 +11,33 @@ import (
 )
 
 type Replyer struct {
-	channel Channel
-	replyed int32
-	codec   Codec
-	req     *RequestMsg
-	hook    func(*RequestMsg, error)
+	channel        Channel
+	replyed        int32
+	codec          Codec
+	req            *RequestMsg
+	outInterceptor []func(*RequestMsg, interface{}, error)
 }
 
-func (r *Replyer) SetReplyHook(fn func(*RequestMsg, error)) {
-	r.hook = fn
+func (r *Replyer) AppendOutInterceptor(interceptor func(*RequestMsg, interface{}, error)) {
+	r.outInterceptor = append(r.outInterceptor, interceptor)
 }
 
-func (r *Replyer) callHook(err error) {
-	if r.hook == nil {
-		return
+func (r *Replyer) callOutInterceptor(ret interface{}, err error) {
+	for _, fn := range r.outInterceptor {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
+				}
+			}()
+			fn(r.req, ret, err)
+		}()
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
-		}
-	}()
-	r.hook(r.req, err)
 }
 
 func (r *Replyer) Error(err error) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
-		r.callHook(err)
+		r.callOutInterceptor(nil, err)
 		if r.req.Oneway {
 			return
 		}
@@ -58,7 +59,7 @@ func (r *Replyer) Error(err error) {
 
 func (r *Replyer) Reply(ret interface{}) {
 	if atomic.CompareAndSwapInt32(&r.replyed, 0, 1) {
-		r.callHook(nil)
+		r.callOutInterceptor(ret, nil)
 		if r.req.Oneway {
 			return
 		}
@@ -127,10 +128,10 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 
 type Server struct {
 	sync.RWMutex
-	methods map[string]*methodCaller
-	codec   Codec
-	stoped  atomic.Bool
-	before  []func(*Replyer, *RequestMsg) bool //前置管道线
+	methods       map[string]*methodCaller
+	codec         Codec
+	stoped        atomic.Bool
+	inInterceptor []func(*Replyer, *RequestMsg) bool //入站管道线
 }
 
 func NewServer(codec Codec) *Server {
@@ -139,8 +140,8 @@ func NewServer(codec Codec) *Server {
 		codec:   codec}
 }
 
-func (s *Server) AddBefore(fn func(*Replyer, *RequestMsg) bool) *Server {
-	s.before = append(s.before, fn)
+func (s *Server) SetInInterceptor(interceptor []func(*Replyer, *RequestMsg) bool) *Server {
+	s.inInterceptor = interceptor
 	return s
 }
 
@@ -199,7 +200,7 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 			replyer.Error(NewError(ErrOther, "method panic"))
 		}
 	}()
-	for _, v := range s.before {
+	for _, v := range s.inInterceptor {
 		if !v(replyer, req) {
 			return
 		}
