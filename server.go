@@ -194,16 +194,19 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 		return
 	}
 	req.arg = arg
+
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Errorf("method:%s channel:%s %s", req.Method, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
 			replyer.Error(NewError(ErrOther, "method panic"))
 		}
 	}()
+
 	for _, v := range s.inInterceptor {
 		if !v(replyer, req) {
 			return
 		}
 	}
+
 	caller.fn.Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 }

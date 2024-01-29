@@ -2,8 +2,6 @@ package rpcgo
 
 import (
 	"context"
-	"encoding/binary"
-	"errors"
 )
 
 var logger Logger
@@ -52,11 +50,12 @@ const (
 )
 
 type RequestMsg struct {
-	Seq    uint64
-	Method string
-	Arg    []byte
-	Oneway bool
-	arg    interface{}
+	Seq      uint64
+	Method   string
+	Arg      []byte
+	UserData []byte
+	Oneway   bool
+	arg      interface{}
 }
 
 func (r RequestMsg) GetArg() interface{} {
@@ -64,21 +63,24 @@ func (r RequestMsg) GetArg() interface{} {
 }
 
 type ResponseMsg struct {
-	Seq uint64
-	Err *Error
-	Ret []byte
+	Seq      uint64
+	Err      *Error
+	Ret      []byte
+	UserData []byte
 }
 
 const (
 	lenSeq       = 8
 	lenOneWay    = 1
 	lenMethod    = 2
-	maxMethodLen = 65535
-	reqHdrLen    = lenSeq + lenOneWay + lenMethod // seq + oneway + len(method)
-	maxErrStrLen = 65535
+	lenUserData  = 2
 	lenErrCode   = 2
-	respHdrLen   = lenSeq + lenErrCode //seq + Error.Err.Code
 	lenErrStr    = 2
+	maxUserData  = 65536
+	maxMethodLen = 65536
+	maxErrStrLen = 65536
+	reqHdrLen    = lenSeq + lenOneWay + lenMethod + lenUserData // seq + oneway + len(method) + len(userdata)
+	respHdrLen   = lenSeq + lenErrCode + lenUserData            //seq + Error.Err.Code + len(userdata)
 )
 
 func EncodeRequest(req *RequestMsg) []byte {
@@ -88,125 +90,114 @@ func EncodeRequest(req *RequestMsg) []byte {
 		method = method[:maxMethodLen]
 	}
 
-	buff := make([]byte, reqHdrLen, reqHdrLen+len(method)+len(req.Arg))
-
-	binary.BigEndian.PutUint64(buff, req.Seq)
-
-	if req.Oneway {
-		buff[lenSeq] = byte(1)
+	lenUserdata := len(req.UserData)
+	if len(req.UserData) > maxUserData {
+		lenUserdata = maxUserData
+		req.UserData = req.UserData[:lenUserdata]
 	}
 
-	binary.BigEndian.PutUint16(buff[lenSeq+lenOneWay:], uint16(len(req.Method)))
+	bw := BytesWriter{
+		B: make([]byte, 0, reqHdrLen+len(method)+lenUserdata+len(req.Arg)),
+	}
 
-	buff = append(buff, method...)
+	//seq
+	bw.WriteUint64(req.Seq)
+	//oneway
+	bw.WriteBool(req.Oneway)
+	//method
+	bw.WriteBytes(method)
+	//userdata
+	bw.WriteBytes(req.UserData)
+	//arg
+	bw.WriteBytes(req.Arg)
 
-	buff = append(buff, req.Arg...)
-
-	return buff
+	return bw.B
 }
 
 func DecodeRequest(buff []byte) (*RequestMsg, error) {
 	var req RequestMsg
-	r := 0
-	buffLen := len(buff)
-	if buffLen-r < lenSeq {
-		return nil, errors.New("invaild request packet")
+	var err error
+	br := BytesReader{
+		B: buff,
 	}
-	req.Seq = binary.BigEndian.Uint64(buff[r:])
-	r += lenSeq
-	if buffLen-r < lenOneWay {
-		return nil, errors.New("invaild request packet")
+	if req.Seq, err = br.ReadUint64(); err != nil {
+		return nil, err
 	}
-	if buff[r] == byte(1) {
-		req.Oneway = true
+	if req.Oneway, err = br.ReadBool(); err != nil {
+		return nil, err
 	}
-	r += lenOneWay
-	if buffLen-r < lenMethod {
-		return nil, errors.New("invaild request packet")
+	if req.Method, err = br.ReadString(); err != nil {
+		return nil, err
 	}
-	methodLen := binary.BigEndian.Uint16(buff[r:])
-	r += lenMethod
-	if buffLen-r < int(methodLen) {
-		return nil, errors.New("invaild request packet")
+	if req.UserData, err = br.ReadBytes(); err != nil {
+		return nil, err
 	}
-	req.Method = string(buff[r : r+int(methodLen)])
-	r += int(methodLen)
-
-	if buffLen-r > 0 {
-		req.Arg = make([]byte, 0, buffLen-r)
-		req.Arg = append(req.Arg, buff[r:]...)
+	if req.Arg, err = br.ReadBytes(); err != nil {
+		return nil, err
 	}
-
 	return &req, nil
 }
 
 func EncodeResponse(resp *ResponseMsg) []byte {
-
-	var buff []byte
 	var errByte []byte
+	var bw BytesWriter
+	lenUserdata := len(resp.UserData)
+	if len(resp.UserData) > maxUserData {
+		lenUserdata = maxUserData
+		resp.UserData = resp.UserData[:lenUserdata]
+	}
 
 	if resp.Err == nil {
-		buff = make([]byte, respHdrLen, respHdrLen+len(resp.Ret))
+		bw.B = make([]byte, 0, respHdrLen+len(resp.Ret)+lenUserdata)
 	} else {
 		errByte = []byte(resp.Err.str)
 		if len(errByte) > maxErrStrLen {
 			errByte = errByte[:maxErrStrLen]
 		}
-		buff = make([]byte, respHdrLen, respHdrLen+lenErrStr+len(errByte)+len(resp.Ret))
+		bw.B = make([]byte, 0, respHdrLen+lenErrStr+len(errByte)+len(resp.Ret)+lenUserdata)
 	}
-
-	binary.BigEndian.PutUint64(buff, resp.Seq)
-
+	//seq
+	bw.WriteUint64(resp.Seq)
+	//usedata
+	bw.WriteBytes(resp.UserData)
+	//err
 	if resp.Err != nil {
-		binary.BigEndian.PutUint16(buff[lenSeq:], uint16(resp.Err.code))
-		errStrLen := []byte{0, 0}
-		binary.BigEndian.PutUint16(errStrLen, uint16(len(errByte)))
-		buff = append(buff, errStrLen...)
-		buff = append(buff, errByte...)
+		bw.WriteUint16(uint16(resp.Err.code))
+		bw.WriteBytes(errByte)
+	} else {
+		bw.WriteUint16(uint16(0))
 	}
-
-	buff = append(buff, resp.Ret...)
-
-	return buff
+	//ret
+	bw.WriteBytes(resp.Ret)
+	return bw.B
 }
 
 func DecodeResponse(buff []byte) (*ResponseMsg, error) {
 	var resp ResponseMsg
-	r := 0
-	buffLen := len(buff)
-	if buffLen-r < lenSeq {
-		return nil, errors.New("invaild response packet")
+	var err error
+	var errCode uint16
+	var errStr string
+	br := BytesReader{
+		B: buff,
 	}
-	resp.Seq = binary.BigEndian.Uint64(buff[r:])
-	r += lenSeq
-
-	if buffLen-r < lenErrCode {
-		return nil, errors.New("invaild response packet")
+	if resp.Seq, err = br.ReadUint64(); err != nil {
+		return nil, err
 	}
-
-	errCode := binary.BigEndian.Uint16(buff[r:])
-
-	r += lenErrCode
-
+	if resp.UserData, err = br.ReadBytes(); err != nil {
+		return nil, err
+	}
+	if errCode, err = br.ReadUint16(); err != nil {
+		return nil, err
+	}
 	if errCode != 0 {
-		if buffLen-r < lenErrStr {
-			return nil, errors.New("invaild response packet")
+		if errStr, err = br.ReadString(); err != nil {
+			return nil, err
 		}
-		errStrLen := binary.BigEndian.Uint16(buff[r:])
-		r += lenErrStr
-		if buffLen-r < int(errStrLen) {
-			return nil, errors.New("invaild response packet")
-		}
-
-		resp.Err = NewError(int(errCode), string(buff[r:r+int(errStrLen)]))
-		r += int(errStrLen)
+		resp.Err = NewError(int(errCode), errStr)
 	}
-
-	if buffLen-r > 0 {
-		resp.Ret = make([]byte, 0, buffLen-r)
-		resp.Ret = append(resp.Ret, buff[r:]...)
+	if resp.Ret, err = br.ReadBytes(); err != nil {
+		return nil, err
 	}
-
 	return &resp, nil
 }
 
