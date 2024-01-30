@@ -173,26 +173,26 @@ func (codec *PacketCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt
 	}
 }
 
-func TestCaller(t *testing.T) {
-	rpcServer := NewServer(&JsonCodec{})
-	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
-		beg := time.Now()
-		//设置钩子函数,当Replyer发送应答时调用
-		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
-			if err == nil {
-				logger.Debugf("serve %s(\"%v\") resp:%v use:%v", req.Method, *req.GetArg().(*string), ret, time.Now().Sub(beg))
-			} else {
-				logger.Debugf("serve %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
-			}
-		})
-		return true
-	}))
+type server struct {
+	rpcServer *Server
+	l         net.Listener
+	serve     func()
+}
 
-	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
-		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
-	})
+func (s *server) start() {
+	go s.serve()
+}
 
-	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+func (s *server) stop() {
+	s.l.Close()
+	s.rpcServer.Stop()
+}
+
+func newServer(service string) (s *server, err error) {
+	s = &server{
+		rpcServer: NewServer(&JsonCodec{}),
+	}
+	s.l, s.serve, err = netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
 		logger.Debugf("on new client")
 		codec := &PacketCodec{buff: make([]byte, 4096)}
 		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
@@ -206,16 +206,31 @@ func TestCaller(t *testing.T) {
 				logger.Debugf("on message")
 				as.Send(packet)
 			case *RequestMsg:
-				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
+				s.rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
 			}
 			return nil
 		}).Recv()
 	})
 
-	go serve()
+	if err != nil {
+		return nil, err
+	} else {
+		return s, err
+	}
+}
 
+type client struct {
+	rpcClient     *Client
+	rpcChannel    *testChannel
+	packetHandler func(context context.Context, packet interface{})
+}
+
+func newClient(remote string) (*client, error) {
 	dialer := &net.Dialer{}
-	conn, _ := dialer.Dial("tcp", "localhost:8110")
+	conn, err := dialer.Dial("tcp", remote)
+	if err != nil {
+		return nil, err
+	}
 	codec := &PacketCodec{buff: make([]byte, 4096)}
 	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
 		netgo.AsynSocketOption{
@@ -223,21 +238,53 @@ func TestCaller(t *testing.T) {
 			AutoRecv: true,
 		})
 
-	msgChan := make(chan struct{})
-
 	rpcChannel := &testChannel{socket: as}
 	rpcClient := NewClient(&JsonCodec{})
+
+	c := &client{
+		rpcClient:  rpcClient,
+		rpcChannel: rpcChannel,
+	}
+
 	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
 		switch packet := packet.(type) {
-		case string:
-			close(msgChan)
 		case *ResponseMsg:
 			rpcClient.OnMessage(nil, packet)
+		default:
+			if c.packetHandler != nil {
+				c.packetHandler(context, packet)
+			}
 		}
 		return nil
 	}).Recv()
 
-	caller := MakeCaller[string, string](rpcClient, "hello", rpcChannel)
+	return c, nil
+}
+
+func TestCaller(t *testing.T) {
+	s, _ := newServer("localhost:8110")
+	s.rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
+		beg := time.Now()
+		//设置钩子函数,当Replyer发送应答时调用
+		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
+			if err == nil {
+				logger.Debugf("serve %s(\"%v\") resp:%v use:%v", req.Method, *req.GetArg().(*string), ret, time.Now().Sub(beg))
+			} else {
+				logger.Debugf("serve %s(\"%v\") with error:%v", req.Method, *req.GetArg().(*string), err)
+			}
+		})
+		return true
+	}))
+
+	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
+	})
+
+	s.start()
+
+	cli, _ := newClient("localhost:8110")
+
+	caller := MakeCaller[string, string](cli.rpcClient, "hello", cli.rpcChannel)
 
 	caller.Oneway(CallerOpt{}, MakeArgument("Oneway"))
 
@@ -248,7 +295,7 @@ func TestCaller(t *testing.T) {
 
 	c := make(chan struct{})
 
-	err = caller.AsyncCall(CallerOpt{}, MakeArgument("AsyncCall"), func(r *string, err error) {
+	caller.AsyncCall(CallerOpt{}, MakeArgument("AsyncCall"), func(r *string, err error) {
 		if err == nil {
 			fmt.Println(*r, err)
 		}
@@ -257,16 +304,61 @@ func TestCaller(t *testing.T) {
 
 	<-c
 
-	as.Close(nil)
-	listener.Close()
+	cli.rpcChannel.socket.Close(nil)
+	s.stop()
+}
+
+func TestAuth(t *testing.T) {
+	s, _ := newServer("localhost:8110")
+
+	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
+	})
+
+	s.rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
+		token := string(req.UserData)
+		if token == "12345678" {
+			return true
+		} else {
+			replyer.Error(NewError(ErrOther, "auth failed"))
+			return false
+		}
+	}))
+
+	s.start()
+
+	counter := 0
+
+	cli, _ := newClient("localhost:8110")
+
+	cli.rpcClient.SetOutInterceptor([]func(*RequestMsg, interface{}){
+		func(req *RequestMsg, arg interface{}) {
+			counter++
+			if counter > 1 {
+				req.UserData = []byte("87654321")
+			} else {
+				req.UserData = []byte("12345678")
+			}
+		},
+	})
+
+	var resp string
+	err := cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "hello", "sniperHW", &resp)
+	assert.Nil(t, err)
+	assert.Equal(t, resp, "hello world:sniperHW")
+
+	err = cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "hello", "sniperHW", &resp)
+	assert.Equal(t, err.Error(), "auth failed")
+	s.stop()
 }
 
 func TestTrace(t *testing.T) {
-	rpcServer := NewServer(&JsonCodec{})
-	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	s, _ := newServer("localhost:8110")
+	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
-	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
+
+	s.rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
 		traceID := binary.BigEndian.Uint32(req.UserData)
 		logger.Debugf("[trace] server recv %s traceID:%d", req.Method, traceID)
 		//设置钩子函数,当Replyer发送应答时调用
@@ -276,42 +368,11 @@ func TestTrace(t *testing.T) {
 		return true
 	}))
 
-	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
-		logger.Debugf("on new client")
-		codec := &PacketCodec{buff: make([]byte, 4096)}
-		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
-			netgo.AsynSocketOption{
-				Codec:    codec,
-				AutoRecv: true,
-			})
-		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
-			switch packet := packet.(type) {
-			case string:
-				logger.Debugf("on message")
-				as.Send(packet)
-			case *RequestMsg:
-				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
-			}
-			return nil
-		}).Recv()
-	})
-	go serve()
+	s.start()
 
-	dialer := &net.Dialer{}
-	conn, _ := dialer.Dial("tcp", "localhost:8110")
-	codec := &PacketCodec{buff: make([]byte, 4096)}
-	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
-		netgo.AsynSocketOption{
-			Codec:    codec,
-			AutoRecv: true,
-		})
+	cli, _ := newClient("localhost:8110")
 
-	msgChan := make(chan struct{})
-
-	rpcChannel := &testChannel{socket: as}
-	rpcClient := NewClient(&JsonCodec{})
-
-	rpcClient.SetOutInterceptor([]func(*RequestMsg, interface{}){
+	cli.rpcClient.SetOutInterceptor([]func(*RequestMsg, interface{}){
 		func(req *RequestMsg, arg interface{}) {
 			//设置traceID
 			req.UserData = make([]byte, 4)
@@ -319,41 +380,28 @@ func TestTrace(t *testing.T) {
 		},
 	})
 
-	rpcClient.SetInInterceptor([]func(*RequestMsg, interface{}, error){
+	cli.rpcClient.SetInInterceptor([]func(*RequestMsg, interface{}, error){
 		func(req *RequestMsg, ret interface{}, err error) {
 			traceID := binary.BigEndian.Uint32(req.UserData)
 			logger.Debugf("%s on response traceID:%d", req.Method, traceID)
 		},
 	})
 
-	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
-		switch packet := packet.(type) {
-		case string:
-			close(msgChan)
-		case *ResponseMsg:
-			rpcClient.OnMessage(nil, packet)
-		}
-		return nil
-	}).Recv()
-	as.Send("msg")
-	<-msgChan
-
 	logger.Debugf("begin rpc call")
 
 	var resp string
-	err := rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
+	err := cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "hello", "sniperHW", &resp)
 	assert.Nil(t, err)
 	assert.Equal(t, resp, "hello world:sniperHW")
 
-	rpcServer.Stop()
-	as.Close(nil)
-	listener.Close()
+	cli.rpcChannel.socket.Close(nil)
+	s.stop()
 }
 
 func TestRPC(t *testing.T) {
-	rpcServer := NewServer(&JsonCodec{})
+	s, _ := newServer("localhost:8110")
 
-	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
+	s.rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
 		beg := time.Now()
 		//设置钩子函数,当Replyer发送应答时调用
 		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
@@ -366,11 +414,11 @@ func TestRPC(t *testing.T) {
 		return true
 	}))
 
-	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
-	rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
+	s.rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
 			logger.Debugf("timeout reply")
@@ -378,45 +426,14 @@ func TestRPC(t *testing.T) {
 		}()
 	})
 
-	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
-		logger.Debugf("on new client")
-		codec := &PacketCodec{buff: make([]byte, 4096)}
-		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
-			netgo.AsynSocketOption{
-				Codec:    codec,
-				AutoRecv: true,
-			})
-		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
-			switch packet := packet.(type) {
-			case string:
-				logger.Debugf("on message")
-				as.Send(packet)
-			case *RequestMsg:
-				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
-			}
-			return nil
-		}).Recv()
-	})
+	s.start()
 
-	go serve()
-
-	dialer := &net.Dialer{}
-	conn, _ := dialer.Dial("tcp", "localhost:8110")
-	codec := &PacketCodec{buff: make([]byte, 4096)}
-	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
-		netgo.AsynSocketOption{
-			Codec:    codec,
-			AutoRecv: true,
-		})
+	cli, _ := newClient("localhost:8110")
 
 	msgChan := make(chan struct{})
-
-	rpcChannel := &testChannel{socket: as}
-	rpcClient := NewClient(&JsonCodec{})
-
 	var pendingCall sync.Map
 
-	rpcClient.SetOutInterceptor([]func(*RequestMsg, interface{}){
+	cli.rpcClient.SetOutInterceptor([]func(*RequestMsg, interface{}){
 		func(req *RequestMsg, arg interface{}) {
 			if !req.Oneway {
 				pendingCall.Store(req.Seq, time.Now())
@@ -424,7 +441,7 @@ func TestRPC(t *testing.T) {
 		},
 	})
 
-	rpcClient.SetInInterceptor([]func(*RequestMsg, interface{}, error){
+	cli.rpcClient.SetInInterceptor([]func(*RequestMsg, interface{}, error){
 		func(req *RequestMsg, ret interface{}, err error) {
 			v, ok := pendingCall.LoadAndDelete(req.Seq)
 			if ok {
@@ -433,33 +450,27 @@ func TestRPC(t *testing.T) {
 		},
 	})
 
-	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
-		switch packet := packet.(type) {
-		case string:
-			close(msgChan)
-		case *ResponseMsg:
-			rpcClient.OnMessage(nil, packet)
-		}
-		return nil
-	}).Recv()
-	as.Send("msg")
+	cli.packetHandler = func(context context.Context, packet interface{}) {
+		close(msgChan)
+	}
+	cli.rpcChannel.socket.Send("msg")
 	<-msgChan
 
 	logger.Debugf("begin rpc call")
 
 	var resp string
-	err := rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
+	err := cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "hello", "sniperHW", &resp)
 	assert.Nil(t, err)
 	assert.Equal(t, resp, "hello world:sniperHW")
 
-	err = rpcClient.AsyncCall(rpcChannel, "hello", "sniperHW", &resp, time.Now().Add(time.Second), func(v interface{}, err error) {
+	err = cli.rpcClient.AsyncCall(cli.rpcChannel, "hello", "sniperHW", &resp, time.Now().Add(time.Second), func(v interface{}, err error) {
 		assert.Equal(t, *v.(*string), "hello world:sniperHW")
 		assert.Nil(t, err)
 	})
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*4)
-	err = rpcClient.Call(ctx, rpcChannel, "timeout", "sniperHW", &resp)
+	err = cli.rpcClient.Call(ctx, cli.rpcChannel, "timeout", "sniperHW", &resp)
 	cancel()
 	assert.Equal(t, err.(*Error).Is(ErrTimeout), true)
 
@@ -467,38 +478,36 @@ func TestRPC(t *testing.T) {
 
 	c := make(chan struct{})
 
-	rpcServer.Register("syncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
+	s.rpcServer.Register("syncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
 		logger.Debugf("syncOneway %s", *arg)
 		replyer.Reply(*arg)
 		close(c)
 	})
 
-	err = rpcClient.Call(context.TODO(), rpcChannel, "syncOneway", "sniperHW", nil)
+	err = cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "syncOneway", "sniperHW", nil)
 	assert.Nil(t, err)
 	<-c
 
-	rpcServer.UnRegister("hello")
+	s.rpcServer.UnRegister("hello")
 
-	err = rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
+	err = cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "hello", "sniperHW", &resp)
 	assert.Equal(t, err.(*Error).Is(ErrInvaildMethod), true)
 
-	rpcServer.Register("panic", func(_ context.Context, replyer *Replyer, arg *string) {
+	s.rpcServer.Register("panic", func(_ context.Context, replyer *Replyer, arg *string) {
 		//cause panic
 		panic("panic")
 	})
 
-	err = rpcClient.Call(context.TODO(), rpcChannel, "panic", "sniperHW", &resp)
+	err = cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "panic", "sniperHW", &resp)
 	assert.Equal(t, err.Error(), "method panic")
 
-	rpcServer.Stop()
+	s.rpcServer.Stop()
 
-	err = rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
+	err = cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "hello", "sniperHW", &resp)
 	assert.Equal(t, err.(*Error).Is(ErrServiceUnavaliable), true)
 
-	as.Close(nil)
-
-	listener.Close()
-
+	cli.rpcChannel.socket.Close(nil)
+	s.stop()
 }
 
 func TestEnDeCode(t *testing.T) {
@@ -623,10 +632,7 @@ func (c *channelInterestDisconnect) Name() string {
 }
 
 func (c *channelInterestDisconnect) IsRetryAbleError(e error) bool {
-	if e == errBusy {
-		return true
-	}
-	return false
+	return e == errBusy
 }
 
 func (c *channelInterestDisconnect) OnDisconnect() {
@@ -646,9 +652,9 @@ func (c *channelInterestDisconnect) LoadAndDeletePending(seq uint64) (interface{
 }
 
 func TestManagePendingChannel(t *testing.T) {
-	rpcServer := NewServer(&JsonCodec{})
+	s, _ := newServer("localhost:8110")
 
-	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
+	s.rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
 		beg := time.Now()
 		//设置钩子函数,当Replyer发送应答时调用
 		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
@@ -660,11 +666,11 @@ func TestManagePendingChannel(t *testing.T) {
 		})
 		return true
 	}))
-	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
-	rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
+	s.rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
 			logger.Debugf("timeout reply")
@@ -672,27 +678,7 @@ func TestManagePendingChannel(t *testing.T) {
 		}()
 	})
 
-	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
-		logger.Debugf("on new client")
-		codec := &PacketCodec{buff: make([]byte, 4096)}
-		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
-			netgo.AsynSocketOption{
-				Codec:    codec,
-				AutoRecv: true,
-			})
-		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
-			switch packet := packet.(type) {
-			case string:
-				logger.Debugf("on message")
-				as.Send(packet)
-			case *RequestMsg:
-				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
-			}
-			return nil
-		}).Recv()
-	})
-
-	go serve()
+	s.start()
 
 	dialer := &net.Dialer{}
 	conn, _ := dialer.Dial("tcp", "localhost:8110")
@@ -749,5 +735,5 @@ func TestManagePendingChannel(t *testing.T) {
 	cancel()
 	assert.Equal(t, err.(*Error).Is(ErrDisconnet), true)
 
-	listener.Close()
+	s.stop()
 }

@@ -3,72 +3,17 @@ package rpcgo
 import (
 	"context"
 	"fmt"
-	"net"
 	"testing"
-
-	"github.com/sniperHW/netgo"
 )
 
-func startServer() (net.Listener, error) {
-	rpcServer := NewServer(&JsonCodec{})
-	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+func Benchmark_Call(b *testing.B) {
+	s, _ := newServer("localhost:8110")
+	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
-
-	listener, serve, err := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
-		codec := &PacketCodec{buff: make([]byte, 4096)}
-		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
-			netgo.AsynSocketOption{
-				Codec:    codec,
-				AutoRecv: true,
-			})
-		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
-			switch packet := packet.(type) {
-			case string:
-				as.Send(packet)
-			case *RequestMsg:
-				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
-			}
-			return nil
-		}).Recv()
-	})
-
-	if err == nil {
-		go serve()
-	}
-
-	return listener, err
-}
-
-func newClient() (*Client, *testChannel) {
-	dialer := &net.Dialer{}
-	conn, _ := dialer.Dial("tcp", "localhost:8110")
-	codec := &PacketCodec{buff: make([]byte, 4096)}
-	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
-		netgo.AsynSocketOption{
-			Codec:    codec,
-			AutoRecv: true,
-		})
-
-	rpcChannel := &testChannel{socket: as}
-
-	rpcClient := NewClient(&JsonCodec{})
-	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
-		switch packet := packet.(type) {
-		case string:
-		case *ResponseMsg:
-			rpcClient.OnMessage(nil, packet)
-		}
-		return nil
-	}).Recv()
-
-	return rpcClient, rpcChannel
-}
-
-func Benchmark_Call(b *testing.B) {
-	listener, _ := startServer()
-	cli, channel := newClient()
-	caller := MakeCaller[string, string](cli, "hello", channel)
+	s.start()
+	cli, _ := newClient("localhost:8110")
+	caller := MakeCaller[string, string](cli.rpcClient, "hello", cli.rpcChannel)
 	b.ResetTimer()
 	b.StartTimer()
 	defer b.StopTimer()
@@ -78,13 +23,18 @@ func Benchmark_Call(b *testing.B) {
 			b.Fatal(err.Error())
 		}
 	}
-	listener.Close()
+	cli.rpcChannel.socket.Close(nil)
+	s.stop()
 }
 
 func Benchmark_Call_Concurrency(b *testing.B) {
-	listener, _ := startServer()
-	cli, channel := newClient()
-	caller := MakeCaller[string, string](cli, "hello", channel)
+	s, _ := newServer("localhost:8110")
+	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
+	})
+	s.start()
+	cli, _ := newClient("localhost:8110")
+	caller := MakeCaller[string, string](cli.rpcClient, "hello", cli.rpcChannel)
 	b.ResetTimer()
 	b.StartTimer()
 	defer b.StopTimer()
@@ -96,5 +46,6 @@ func Benchmark_Call_Concurrency(b *testing.B) {
 			}
 		}
 	})
-	listener.Close()
+	cli.rpcChannel.socket.Close(nil)
+	s.stop()
 }
