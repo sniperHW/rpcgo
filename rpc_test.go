@@ -261,6 +261,95 @@ func TestCaller(t *testing.T) {
 	listener.Close()
 }
 
+func TestTrace(t *testing.T) {
+	rpcServer := NewServer(&JsonCodec{})
+	rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
+	})
+	rpcServer.SetInInterceptor(append([]func(replyer *Replyer, req *RequestMsg) bool{}, func(replyer *Replyer, req *RequestMsg) bool {
+		traceID := binary.BigEndian.Uint32(req.UserData)
+		logger.Debugf("[trace] server recv %s traceID:%d", req.Method, traceID)
+		//设置钩子函数,当Replyer发送应答时调用
+		replyer.AppendOutInterceptor(func(req *RequestMsg, ret interface{}, err error) {
+			logger.Debugf("[trace] server reply %s traceID:%d", req.Method, traceID)
+		})
+		return true
+	}))
+
+	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		logger.Debugf("on new client")
+		codec := &PacketCodec{buff: make([]byte, 4096)}
+		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
+			netgo.AsynSocketOption{
+				Codec:    codec,
+				AutoRecv: true,
+			})
+		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
+			switch packet := packet.(type) {
+			case string:
+				logger.Debugf("on message")
+				as.Send(packet)
+			case *RequestMsg:
+				rpcServer.OnMessage(context, &testChannel{socket: as}, packet)
+			}
+			return nil
+		}).Recv()
+	})
+	go serve()
+
+	dialer := &net.Dialer{}
+	conn, _ := dialer.Dial("tcp", "localhost:8110")
+	codec := &PacketCodec{buff: make([]byte, 4096)}
+	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
+		netgo.AsynSocketOption{
+			Codec:    codec,
+			AutoRecv: true,
+		})
+
+	msgChan := make(chan struct{})
+
+	rpcChannel := &testChannel{socket: as}
+	rpcClient := NewClient(&JsonCodec{})
+
+	rpcClient.SetOutInterceptor([]func(*RequestMsg, interface{}){
+		func(req *RequestMsg, arg interface{}) {
+			//设置traceID
+			req.UserData = make([]byte, 4)
+			binary.BigEndian.PutUint32(req.UserData, 1000001)
+		},
+	})
+
+	rpcClient.SetInInterceptor([]func(*RequestMsg, interface{}, error){
+		func(req *RequestMsg, ret interface{}, err error) {
+			traceID := binary.BigEndian.Uint32(req.UserData)
+			logger.Debugf("%s on response traceID:%d", req.Method, traceID)
+		},
+	})
+
+	as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
+		switch packet := packet.(type) {
+		case string:
+			close(msgChan)
+		case *ResponseMsg:
+			rpcClient.OnMessage(nil, packet)
+		}
+		return nil
+	}).Recv()
+	as.Send("msg")
+	<-msgChan
+
+	logger.Debugf("begin rpc call")
+
+	var resp string
+	err := rpcClient.Call(context.TODO(), rpcChannel, "hello", "sniperHW", &resp)
+	assert.Nil(t, err)
+	assert.Equal(t, resp, "hello world:sniperHW")
+
+	rpcServer.Stop()
+	as.Close(nil)
+	listener.Close()
+}
+
 func TestRPC(t *testing.T) {
 	rpcServer := NewServer(&JsonCodec{})
 

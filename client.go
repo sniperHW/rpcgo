@@ -36,37 +36,30 @@ type asynContext struct {
 }
 
 func (c *asynContext) OnDisconnect() {
-	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
-		err := NewError(ErrDisconnet, "disconnect")
-		c.cli.callInInterceptor(c.req, nil, err)
-		c.onResponse(nil, err)
-	}
+	c.callOnResponse(nil, nil, NewError(ErrDisconnet, "disconnect"))
 }
 
-func (c *asynContext) callOnResponse(codec Codec, resp []byte, err *Error) {
+func (c *asynContext) callOnResponse(codec Codec, resp []byte, err *Error) bool {
 	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
+		var e error
 		if err == nil {
-			if e := codec.Decode(resp, c.ret); e != nil {
+			if e = codec.Decode(resp, c.ret); e != nil {
 				logger.Errorf("callOnResponse decode error:%v", e)
-				err = NewError(ErrOther, "decode resp.Ret")
-				c.cli.callInInterceptor(c.req, nil, err)
-				c.onResponse(nil, err)
-			} else {
-				c.cli.callInInterceptor(c.req, c.ret, nil)
-				c.onResponse(c.ret, nil)
+				e = NewError(ErrOther, "decode resp.Ret")
 			}
 		} else {
-			c.cli.callInInterceptor(c.req, nil, err)
-			c.onResponse(nil, err)
+			e = err
 		}
+		c.cli.callInInterceptor(c.req, c.ret, e)
+		c.onResponse(c.ret, e)
+		return true
+	} else {
+		return false
 	}
 }
 
 func (c *asynContext) onTimeout() {
-	if atomic.CompareAndSwapInt32(&c.fired, 0, 1) {
-		err := NewError(ErrTimeout, "timeout")
-		c.cli.callInInterceptor(c.req, nil, err)
-		c.onResponse(nil, err)
+	if c.callOnResponse(nil, nil, NewError(ErrTimeout, "timeout")) {
 		asynCtxPool.Put(c)
 	}
 }
