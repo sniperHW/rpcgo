@@ -72,37 +72,40 @@ func (c *Client) afterFunc(d time.Duration, fn func()) *Timer {
 	t.deadline = time.Now().Add(d)
 	t.fn = fn
 	t.fired.Store(false)
+	head := c.timers[0]
 	heap.Push(&c.timedHeap, t)
-	if !c.checkTimer && t == c.timers[0] {
-		//新定时器是时间最近的定时器
-		if c.timer == nil {
-			c.timer = time.AfterFunc(d, func() {
-				c.Lock()
-				c.checkTimer = true
-				now := time.Now()
-				for len(c.timers) > 0 {
-					near := c.timers[0]
-					if now.After(near.deadline) {
-						heap.Pop(&c.timedHeap)
-						c.Unlock()
-						near.call()
-						c.Lock()
-						timerPool.Put(near)
-					} else {
-						break
+	if !c.checkTimer {
+		if t == c.timers[0] || head != t {
+			//新定时器是时间最近的定时器
+			if c.timer == nil {
+				c.timer = time.AfterFunc(d, func() {
+					c.Lock()
+					c.checkTimer = true
+					now := time.Now()
+					for len(c.timers) > 0 {
+						near := c.timers[0]
+						if now.After(near.deadline) {
+							heap.Pop(&c.timedHeap)
+							c.Unlock()
+							near.call()
+							c.Lock()
+							timerPool.Put(near)
+						} else {
+							break
+						}
 					}
+					if len(c.timers) > 0 {
+						c.timer.Reset(time.Until(c.timers[0].deadline))
+					}
+					c.checkTimer = false
+					c.Unlock()
+				})
+			} else {
+				if !c.timer.Stop() {
+					<-c.timer.C
 				}
-				if len(c.timers) > 0 {
-					c.timer.Reset(time.Until(c.timers[0].deadline))
-				}
-				c.checkTimer = false
-				c.Unlock()
-			})
-		} else {
-			if !c.timer.Stop() {
-				<-c.timer.C
+				c.timer.Reset(d)
 			}
-			c.timer.Reset(d)
 		}
 	}
 	return t
