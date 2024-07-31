@@ -192,7 +192,7 @@ func newServer(service string) (s *server, err error) {
 	s = &server{
 		rpcServer: NewServer(&JsonCodec{}),
 	}
-	s.l, s.serve, err = netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+	s.l, s.serve, err = netgo.ListenTCP("tcp", service, func(conn *net.TCPConn) {
 		logger.Debugf("on new client")
 		codec := &PacketCodec{buff: make([]byte, 4096)}
 		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
