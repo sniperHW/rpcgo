@@ -100,7 +100,10 @@ func (c *Client) afterFunc(d time.Duration, fn func()) *Timer {
 			})
 		} else {
 			if !c.timer.Stop() {
-				<-c.timer.C
+				select {
+				case <-c.timer.C:
+				default:
+				}
 			}
 			c.timer.Reset(d)
 		}
