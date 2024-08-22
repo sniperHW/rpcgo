@@ -99,9 +99,13 @@ func (c *Client) afterFunc(d time.Duration, fn func()) *Timer {
 				c.Unlock()
 			})
 		} else {
-			if c.timer.Stop() {
-				c.timer.Reset(d)
+			if !c.timer.Stop() {
+				select {
+				case <-c.timer.C:
+				default:
+				}
 			}
+			c.timer.Reset(d)
 		}
 	}
 	return t
