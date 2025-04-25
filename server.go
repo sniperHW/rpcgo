@@ -110,11 +110,11 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 	}
 
 	if fnType.In(1) != reflect.TypeOf(&Replyer{}) {
-		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
+		return nil, errors.New("method should have type func(context.Context,*Replyer,*Pointer)")
 	}
 
 	if fnType.In(2).Kind() != reflect.Ptr {
-		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
+		return nil, errors.New("method should have type func(context.Context,*Replyer,*Pointer)")
 	}
 
 	caller := &methodCaller{
