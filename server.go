@@ -105,7 +105,7 @@ func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
 		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
 	}
 
-	if !fnType.In(0).Implements(reflect.TypeOf((*context.Context)(nil)).Elem()) {
+	if fnType.In(0) != reflect.TypeOf((*context.Context)(nil)).Elem() {
 		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
 	}
 
