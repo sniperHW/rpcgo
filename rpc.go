@@ -2,6 +2,9 @@ package rpcgo
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"runtime/debug"
 )
 
 var logger Logger
@@ -228,4 +231,45 @@ type ChannelInterestDisconnect interface {
 	OnDisconnect()
 	PutPending(uint64, PendingCall)
 	LoadAndDeletePending(uint64) (interface{}, bool)
+}
+
+func Register[Arg any](s *Server, name string, method func(context.Context, *Replyer, *Arg)) error {
+	s.Lock()
+	defer s.Unlock()
+	if name == "" {
+		return errors.New("RegisterMethod nams is nil")
+	} else if _, ok := s.methods[name]; ok {
+		return fmt.Errorf("duplicate method:%s", name)
+	} else {
+
+		caller := func(c context.Context, s *Server, req *RequestMsg, replyer *Replyer) (err error) {
+			arg := new(Arg)
+			if err = s.codec.Decode(req.Arg, arg); err != nil {
+				return NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err))
+			}
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("method:%s channel:%s %s", req.Method, replyer.channel.Name(), fmt.Sprintf("%v: %s", r, string(debug.Stack())))
+					err = NewError(ErrOther, "method panic")
+				}
+			}()
+			req.arg = arg
+
+			for _, v := range s.inInterceptor {
+				if !v(replyer, req) {
+					return
+				}
+			}
+			method(c, replyer, arg)
+			return nil
+		}
+		s.methods[name] = caller
+		return nil
+	}
+}
+
+func UnRegister(s *Server, name string) {
+	s.Lock()
+	defer s.Unlock()
+	delete(s.methods, name)
 }

@@ -2,13 +2,13 @@ package rpcgo
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"reflect"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 )
+
+type method func(context.Context, *Server, *RequestMsg, *Replyer) error
 
 type Replyer struct {
 	channel        Channel
@@ -27,7 +27,7 @@ func (r *Replyer) callOutInterceptor(ret interface{}, err error) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
+					logger.Errorf("%v: %s", r, debug.Stack())
 				}
 			}()
 			fn(r.req, ret, err)
@@ -84,51 +84,9 @@ func (r *Replyer) Channel() Channel {
 	return r.channel
 }
 
-type methodCaller struct {
-	name    string
-	argType reflect.Type
-	fn      reflect.Value
-}
-
-// 接受的method func(context.Context, *Replyer,*Pointer)
-func makeMethodCaller(name string, method interface{}) (*methodCaller, error) {
-	if method == nil {
-		return nil, errors.New("method is nil")
-	}
-
-	fnType := reflect.TypeOf(method)
-	if fnType.Kind() != reflect.Func {
-		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
-	}
-
-	if fnType.NumIn() != 3 {
-		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
-	}
-
-	if fnType.In(0) != reflect.TypeOf((*context.Context)(nil)).Elem() {
-		return nil, errors.New("method should have type func(context.Contex,*Replyer,*Pointer)")
-	}
-
-	if fnType.In(1) != reflect.TypeOf(&Replyer{}) {
-		return nil, errors.New("method should have type func(context.Context,*Replyer,*Pointer)")
-	}
-
-	if fnType.In(2).Kind() != reflect.Ptr {
-		return nil, errors.New("method should have type func(context.Context,*Replyer,*Pointer)")
-	}
-
-	caller := &methodCaller{
-		argType: fnType.In(2).Elem(),
-		fn:      reflect.ValueOf(method),
-		name:    name,
-	}
-
-	return caller, nil
-}
-
 type Server struct {
 	sync.RWMutex
-	methods       map[string]*methodCaller
+	methods       map[string]method
 	codec         Codec
 	stoped        atomic.Bool
 	inInterceptor []func(*Replyer, *RequestMsg) bool //入站管道线
@@ -136,7 +94,7 @@ type Server struct {
 
 func NewServer(codec Codec) *Server {
 	return &Server{
-		methods: map[string]*methodCaller{},
+		methods: map[string]method{},
 		codec:   codec}
 }
 
@@ -149,28 +107,7 @@ func (s *Server) Stop() {
 	s.stoped.CompareAndSwap(false, true)
 }
 
-func (s *Server) Register(name string, method interface{}) error {
-	s.Lock()
-	defer s.Unlock()
-	if name == "" {
-		return errors.New("RegisterMethod nams is nil")
-	} else if caller, err := makeMethodCaller(name, method); err != nil {
-		return err
-	} else if _, ok := s.methods[name]; ok {
-		return fmt.Errorf("duplicate method:%s", name)
-	} else {
-		s.methods[name] = caller
-		return nil
-	}
-}
-
-func (s *Server) UnRegister(name string) {
-	s.Lock()
-	defer s.Unlock()
-	delete(s.methods, name)
-}
-
-func (s *Server) method(name string) *methodCaller {
+func (s *Server) method(name string) method {
 	s.RLock()
 	defer s.RUnlock()
 	return s.methods[name]
@@ -182,31 +119,13 @@ func (s *Server) OnMessage(context context.Context, channel Channel, req *Reques
 		replyer.Error(NewError(ErrServiceUnavaliable, "service unavaliable"))
 		return
 	}
-	caller := s.method(req.Method)
-	if caller == nil {
+	fn := s.method(req.Method)
+	if fn == nil {
 		replyer.Error(NewError(ErrInvaildMethod, fmt.Sprintf("method %s not found", req.Method)))
 		return
 	}
-	arg := reflect.New(caller.argType).Interface()
-	if err := s.codec.Decode(req.Arg, arg); err != nil {
-		logger.Errorf("method:%s decode arg error:%s channel:%s", req.Method, err.Error(), replyer.channel.Name())
-		replyer.Error(NewError(ErrOther, fmt.Sprintf("arg decode error:%v", err)))
-		return
+
+	if err := fn(context, s, req, replyer); err != nil {
+		replyer.Error(err)
 	}
-	req.arg = arg
-
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Errorf("method:%s channel:%s %s", req.Method, replyer.channel.Name(), fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
-			replyer.Error(NewError(ErrOther, "method panic"))
-		}
-	}()
-
-	for _, v := range s.inInterceptor {
-		if !v(replyer, req) {
-			return
-		}
-	}
-
-	caller.fn.Call([]reflect.Value{reflect.ValueOf(context), reflect.ValueOf(replyer), reflect.ValueOf(arg)})
 }

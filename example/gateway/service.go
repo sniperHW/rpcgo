@@ -13,7 +13,7 @@ import (
 func startService(service string) {
 	rpcServer := rpcgo.NewServer(&JsonCodec{})
 
-	rpcServer.Register("hello", func(context context.Context, replyer *rpcgo.Replyer, arg *string) {
+	rpcgo.Register(rpcServer, "hello", func(context context.Context, replyer *rpcgo.Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 

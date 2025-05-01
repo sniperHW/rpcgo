@@ -2,8 +2,6 @@ package rpcgo
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -97,7 +95,7 @@ func (c *Client) callInInterceptor(req *RequestMsg, ret interface{}, err error) 
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
+					logger.Errorf("%%v: %s", r, debug.Stack())
 				}
 			}()
 			fn(req, ret, err)
@@ -110,7 +108,7 @@ func (c *Client) callOutInterceptor(req *RequestMsg, arg interface{}) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf("%s ", fmt.Errorf(fmt.Sprintf("%v: %s", r, debug.Stack())))
+					logger.Errorf("%%v: %s", r, debug.Stack())
 				}
 			}()
 			fn(req, arg)
@@ -329,104 +327,26 @@ func (c *Client) Call(ctx context.Context, channel Channel, method string, arg i
 	}
 }
 
-//helper
-
-func MakeArgument[T any](v T) *T {
-	return &v
+func Post[Arg any](ctx context.Context, c *Client, channel Channel, method string, arg Arg) (err error) {
+	err = c.Call(ctx, channel, method, arg, nil)
+	return
 }
 
-func MakeCaller[Arg any, Ret any](cli *Client, method string, channel ...Channel) *Caller[Arg, Ret] {
-	c := &Caller[Arg, Ret]{
-		c:      cli,
-		method: method,
-	}
-	if len(channel) > 0 {
-		c.channel = channel[0]
-	}
-	return c
+func Call[Arg any, Ret any](ctx context.Context, c *Client, channel Channel, method string, arg Arg) (ret *Ret, err error) {
+	ret = new(Ret)
+	err = c.Call(ctx, channel, method, arg, ret)
+	return
 }
 
-type Caller[Arg any, Ret any] struct {
-	channel Channel
-	method  string
-	c       *Client
+func CallWithTimeout[Arg any, Ret any](c *Client, channel Channel, method string, arg Arg, d time.Duration) (ret *Ret, err error) {
+	ret = new(Ret)
+	err = c.CallWithTimeout(channel, method, arg, ret, d)
+	return
 }
 
-type CallerOpt struct {
-	Channel Channel
-	Context context.Context
-	Timeout time.Duration
-}
-
-func (c *Caller[Arg, Ret]) SetChannel(channel Channel) *Caller[Arg, Ret] {
-	c.channel = channel
-	return c
-}
-
-func (c *Caller[Arg, Ret]) Oneway(opt CallerOpt, arg *Arg) error {
-	var channel Channel
-	if opt.Channel != nil {
-		channel = opt.Channel
-	} else {
-		channel = c.channel
-	}
-	if channel == nil {
-		return errors.New("channel is nil")
-	}
-	if opt.Timeout > 0 {
-		return c.c.CallWithTimeout(channel, c.method, arg, nil, opt.Timeout)
-	} else if opt.Context != nil {
-		return c.c.Call(opt.Context, channel, c.method, arg, nil)
-	} else {
-		return c.c.Call(context.Background(), channel, c.method, arg, nil)
-	}
-}
-
-func (c *Caller[Arg, Ret]) Call(opt CallerOpt, arg *Arg) (*Ret, error) {
-	var res Ret
-	var err error
-	var channel Channel
-	if opt.Channel != nil {
-		channel = opt.Channel
-	} else {
-		channel = c.channel
-	}
-
-	if channel == nil {
-		return nil, errors.New("channel is nil")
-	}
-
-	if opt.Timeout > 0 {
-		err = c.c.CallWithTimeout(channel, c.method, arg, &res, opt.Timeout)
-	} else if opt.Context != nil {
-		err = c.c.Call(opt.Context, channel, c.method, *arg, &res)
-	} else {
-		err = c.c.Call(context.Background(), channel, c.method, *arg, &res)
-	}
-	return &res, err
-}
-
-func (c *Caller[Arg, Ret]) AsyncCall(opt CallerOpt, arg *Arg, callback func(*Ret, error)) error {
-	var res Ret
-	var channel Channel
-	var deadline time.Time
-	if opt.Channel != nil {
-		channel = opt.Channel
-	} else {
-		channel = c.channel
-	}
-
-	if channel == nil {
-		return errors.New("channel is nil")
-	}
-
-	if opt.Timeout > 0 {
-		deadline = time.Now().Add(opt.Timeout)
-	} else {
-		deadline = time.Now().Add(time.Second)
-	}
-
-	return c.c.AsyncCall(channel, c.method, arg, &res, deadline, func(_ interface{}, err error) {
-		callback(&res, err)
+func AsyncCall[Arg any, Ret any](c *Client, channel Channel, method string, arg Arg, deadline time.Time, callback func(*Ret, error)) error {
+	ret := new(Ret)
+	return c.AsyncCall(channel, method, arg, ret, deadline, func(r interface{}, err error) {
+		callback(r.(*Ret), err)
 	})
 }

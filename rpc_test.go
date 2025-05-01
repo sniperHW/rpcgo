@@ -276,7 +276,7 @@ func TestCaller(t *testing.T) {
 		return true
 	}))
 
-	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
@@ -284,18 +284,19 @@ func TestCaller(t *testing.T) {
 
 	cli, _ := newClient("localhost:8110")
 
-	caller := MakeCaller[string, string](cli.rpcClient, "hello", cli.rpcChannel)
+	//caller := MakeCaller[string, string](cli.rpcClient, "hello", cli.rpcChannel)
+	//caller.Oneway(CallerOpt{}, MakeArgument("Oneway"))
 
-	caller.Oneway(CallerOpt{}, MakeArgument("Oneway"))
+	Post(context.Background(), cli.rpcClient, cli.rpcChannel, "hello", "Oneway")
 
-	r, err := caller.Call(CallerOpt{Timeout: time.Second}, MakeArgument("CallWithTimeout"))
+	r, err := Call[string, string](context.Background(), cli.rpcClient, cli.rpcChannel, "hello", "CallWithTimeout") //caller.Call(CallerOpt{Timeout: time.Second}, MakeArgument("CallWithTimeout"))
 	if err == nil {
 		fmt.Println(*r, err)
 	}
 
 	c := make(chan struct{})
 
-	caller.AsyncCall(CallerOpt{}, MakeArgument("AsyncCall"), func(r *string, err error) {
+	AsyncCall(cli.rpcClient, cli.rpcChannel, "hello", "AsyncCall", time.Now().Add(time.Second), func(r *string, err error) {
 		if err == nil {
 			fmt.Println(*r, err)
 		}
@@ -311,7 +312,7 @@ func TestCaller(t *testing.T) {
 func TestAuth(t *testing.T) {
 	s, _ := newServer("localhost:8110")
 
-	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
@@ -354,7 +355,7 @@ func TestAuth(t *testing.T) {
 
 func TestTrace(t *testing.T) {
 	s, _ := newServer("localhost:8110")
-	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
@@ -414,11 +415,11 @@ func TestRPC(t *testing.T) {
 		return true
 	}))
 
-	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
-	s.rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "timeout", func(_ context.Context, replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
 			logger.Debugf("timeout reply")
@@ -478,7 +479,7 @@ func TestRPC(t *testing.T) {
 
 	c := make(chan struct{})
 
-	s.rpcServer.Register("syncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "syncOneway", func(_ context.Context, replyer *Replyer, arg *string) {
 		logger.Debugf("syncOneway %s", *arg)
 		replyer.Reply(*arg)
 		close(c)
@@ -488,12 +489,12 @@ func TestRPC(t *testing.T) {
 	assert.Nil(t, err)
 	<-c
 
-	s.rpcServer.UnRegister("hello")
+	UnRegister(s.rpcServer, "hello")
 
 	err = cli.rpcClient.Call(context.TODO(), cli.rpcChannel, "hello", "sniperHW", &resp)
 	assert.Equal(t, err.(*Error).Is(ErrInvaildMethod), true)
 
-	s.rpcServer.Register("panic", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "panic", func(_ context.Context, replyer *Replyer, arg *string) {
 		//cause panic
 		panic("panic")
 	})
@@ -666,11 +667,11 @@ func TestManagePendingChannel(t *testing.T) {
 		})
 		return true
 	}))
-	s.rpcServer.Register("hello", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "hello", func(_ context.Context, replyer *Replyer, arg *string) {
 		replyer.Reply(fmt.Sprintf("hello world:%s", *arg))
 	})
 
-	s.rpcServer.Register("timeout", func(_ context.Context, replyer *Replyer, arg *string) {
+	Register[string](s.rpcServer, "timeout", func(_ context.Context, replyer *Replyer, arg *string) {
 		go func() {
 			time.Sleep(time.Second * 5)
 			logger.Debugf("timeout reply")
