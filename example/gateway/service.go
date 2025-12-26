@@ -18,7 +18,7 @@ func startService(service string) {
 	})
 
 	_, serve, _ := netgo.ListenTCP("tcp", service, func(conn *net.TCPConn) {
-		codec := &PacketCodec{buff: make([]byte, 4096)}
+		codec := &PacketCodec{buff: make([]byte, 65536)}
 		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
 			netgo.AsynSocketOption{
 				Codec:    codec,

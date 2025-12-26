@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/sniperHW/netgo"
 	"log"
 	"net"
 	"time"
+
+	"github.com/sniperHW/netgo"
 )
 
 func startGateway(gateService string, rpcService string) {
@@ -17,11 +18,11 @@ func startGateway(gateService string, rpcService string) {
 				if err != nil {
 					time.Sleep(time.Second)
 				} else {
-					rpcSocket = netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketCodec{gate: true, buff: make([]byte, 4096)})
+					rpcSocket = netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketCodec{gate: true, buff: make([]byte, 65536)})
 					break
 				}
 			}
-			cli := netgo.NewTcpSocket(conn, &PacketCodec{gate: true, buff: make([]byte, 4096)})
+			cli := netgo.NewTcpSocket(conn, &PacketCodec{gate: true, buff: make([]byte, 65536)})
 			for {
 				request, err := cli.Recv()
 				if nil != err {
