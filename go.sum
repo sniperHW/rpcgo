@@ -17,6 +17,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/sniperHW/netgo v0.0.0-20231214060736-2b26e624b5f6 h1:dcUm3Yzg3Y8KVerhyh2VtYk6DfaVHnGnMr/tA5xal68=
 github.com/sniperHW/netgo v0.0.0-20231214060736-2b26e624b5f6/go.mod h1:5XP+qSGWoPip7z6RNZQxr3oDJqclD/4zx57dxaSa5Zc=
+github.com/sniperHW/netgo v0.0.0-20251001021742-37e731e8f394 h1:JtVRRRyx5+F3+aNJB2jXplzY4474OJGi5vK9FLmpgF0=
+github.com/sniperHW/netgo v0.0.0-20251001021742-37e731e8f394/go.mod h1:5XP+qSGWoPip7z6RNZQxr3oDJqclD/4zx57dxaSa5Zc=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=

@@ -1,14 +1,14 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net"
-	"time"
 
 	"github.com/sniperHW/netgo"
 )
 
-func startGateway(gateService string, rpcService string) {
+/*func startGateway(gateService string, rpcService string) {
 	_, serve, _ := netgo.ListenTCP("tcp", gateService, func(conn *net.TCPConn) {
 		go func() {
 			dialer := &net.Dialer{}
@@ -38,6 +38,23 @@ func startGateway(gateService string, rpcService string) {
 
 			rpcSocket.Close()
 			cli.Close()
+		}()
+	})
+	log.Println("gate started")
+	serve()
+}
+*/
+
+func startGateway(gateService string, rpcService string) {
+	_, serve, _ := netgo.ListenTCP("tcp", gateService, func(conn *net.TCPConn) {
+		go func() {
+			dialer := &net.Dialer{}
+			serverConn, err := dialer.Dial("tcp", rpcService)
+			if err != nil {
+				return
+			}
+			go io.Copy(conn, serverConn)
+			io.Copy(serverConn, conn)
 		}()
 	})
 	log.Println("gate started")

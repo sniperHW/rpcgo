@@ -65,8 +65,9 @@ func main() {
 
 	as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec),
 		netgo.AsynSocketOption{
-			Codec:    codec,
-			AutoRecv: true,
+			Codec:        codec,
+			AutoRecv:     true,
+			SendChanSize: 256,
 		})
 
 	rpcClient := rpcgo.NewClient(&JsonCodec{})
@@ -97,7 +98,7 @@ func main() {
 
 	for {
 		var waitGroup sync.WaitGroup
-		waitGroup.Add(100)
+		waitGroup.Add(routineCount)
 		beg := time.Now()
 		for i := 0; i < routineCount; i++ {
 			go func(index int) {

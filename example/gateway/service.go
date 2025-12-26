@@ -21,8 +21,9 @@ func startService(service string) {
 		codec := &PacketCodec{buff: make([]byte, 65536)}
 		as := netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
 			netgo.AsynSocketOption{
-				Codec:    codec,
-				AutoRecv: true,
+				Codec:        codec,
+				AutoRecv:     true,
+				SendChanSize: 256,
 			})
 		as.SetPacketHandler(func(context context.Context, as *netgo.AsynSocket, packet interface{}) error {
 			rpcServer.OnMessage(context, &rcpChannel{socket: as}, packet.(*rpcgo.RequestMsg))

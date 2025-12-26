@@ -1,9 +1,8 @@
 module github.com/sniperHW/rpcgo
 
-go 1.18
+go 1.25.1
 
 require (
-	github.com/sniperHW/netgo v0.0.0-20231214060736-2b26e624b5f6
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/zap v1.23.0
 )
@@ -16,6 +15,7 @@ require (
 	github.com/mmcloughlin/avo v0.0.0-20200803215136-443f81d77104 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/sniperHW/netgo v0.0.0-20251001021742-37e731e8f394 // indirect
 	github.com/templexxx/cpu v0.0.7 // indirect
 	github.com/templexxx/xorsimd v0.4.1 // indirect
 	github.com/tjfoc/gmsm v1.3.2 // indirect
